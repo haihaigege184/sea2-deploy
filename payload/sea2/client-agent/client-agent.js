@@ -145,7 +145,12 @@ async function heartbeat(mid, code) {
     console.log('[sea2-fleet] 无 client-code（全新环境/未提供 SEA1_ADMIN_TOKEN）→ 设备维度试用注册%s；machine_id=%s',
       ok ? '成功' : '失败', mid);
   }
-  await heartbeat(mid, code).catch(() => {});
+  const hb0 = await heartbeat(mid, code).catch((e) => { console.log('[sea2-fleet] 首次心跳异常 %s', e.message); return null; });
+  if (hb0) {
+    let j0 = {};
+    try { j0 = JSON.parse(hb0.body || '{}'); } catch (e) { /* noop */ }
+    console.log('[sea2-fleet] 首次心跳 status=%s valid=%s reason=%s', hb0.status, j0.valid, j0.reason);
+  }
 
   let lastGrantTry = Date.now();
   setInterval(async () => {
