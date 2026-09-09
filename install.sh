@@ -186,6 +186,9 @@ install_native_napcat_backup
 pm2_start_stack
 pm2_setup_boot
 
+# ---------- 阶段 5.5：打印机自动配置（探测 USB/网络设备并注册 CUPS 队列） ----------
+configure_printer_auto
+
 # ---------- 阶段 6：健康检查 + 汇总 ----------
 run_verify || true
 
