@@ -1066,6 +1066,32 @@ function makeApp(cfg, keys, store) {
         return serveFile(res, path.join(__dirname, 'public', 'qr', name));
       }
 
+      // ---- 部署大文件分发（公开；一键部署 QQ deb 经内网/隧道池下载，流式避免大文件进内存）----
+      if (req.method === 'GET' && url.pathname.startsWith('/downloads/')) {
+        let rel = '';
+        try { rel = decodeURIComponent(url.pathname.slice('/downloads/'.length)); } catch (e) { return send(res, 400, { ok: false, error: 'bad request' }); }
+        if (!rel || rel.indexOf('\0') >= 0 || rel.includes('/') || rel.includes('\\') || rel.includes('..')) {
+          return send(res, 400, { ok: false, error: 'bad request' });
+        }
+        // 文件名白名单：只放行 linuxqq deb，防任意文件读取
+        if (!/^linuxqq_[0-9.\-]+_(arm64|amd64|x86_64|armhf)\.deb$/i.test(rel)) {
+          return send(res, 403, { ok: false, error: 'forbidden file' });
+        }
+        const dlRoot = path.join(__dirname, 'public', 'downloads');
+        const target = path.join(dlRoot, rel);
+        if (!target.startsWith(dlRoot + path.sep)) return send(res, 403, { ok: false, error: 'forbidden' });
+        fs.stat(target, (err, st) => {
+          if (err || !st.isFile()) return send(res, 404, { ok: false, error: 'not found' });
+          res.writeHead(200, {
+            'Content-Type': 'application/vnd.debian.binary-package',
+            'Content-Length': st.size,
+            'Content-Disposition': 'attachment; filename="' + rel + '"',
+          });
+          fs.createReadStream(target).pipe(res);
+        });
+        return;
+      }
+
       // ---- 控制台静态页（独立新页，旧 /admin 保留兼容）----
       if (req.method === 'GET' && url.pathname === '/console') {
         return serveFile(res, path.join(__dirname, 'public', 'console.html'));

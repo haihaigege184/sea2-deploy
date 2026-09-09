@@ -24,17 +24,31 @@ download_linuxqq() {
   local arch="$1" tmp="$2"
   local candidates=()
   [ -n "$QQ_DEB_URL" ] && candidates+=("$QQ_DEB_URL")
-  candidates+=("$QQ_RELEASE_BASE/linuxqq_${QQ_VERSION}_${arch}.deb")          # ① GIT 基线直连
-  candidates+=("https://ghfast.top/${QQ_RELEASE_BASE}/linuxqq_${QQ_VERSION}_${arch}.deb")  # ② GIT 基线（ghfast 加速）
-  candidates+=("$QQ_DEB_BASE/linuxqq_${QQ_VERSION}_${arch}.deb")              # ③ 腾讯官方 CDN
+  # 1) 服务端分发（主通道）：已选定中央服务端(内网) + 隧道池全部公网地址，全部不可达才往下走
+  local pool c
+  if [ -n "${CENTRAL_SERVER:-}" ]; then
+    candidates+=("${CENTRAL_SERVER%/}/downloads/linuxqq_${QQ_VERSION}_${arch}.deb")
+    pool=$(curl -fsSL --connect-timeout 5 --max-time 15 "${CENTRAL_SERVER%/}/api/deploy/tunnels" 2>/dev/null || true)
+    if [ -n "$pool" ]; then
+      while IFS= read -r c; do
+        [ -n "$c" ] && candidates+=("${c%/}/downloads/linuxqq_${QQ_VERSION}_${arch}.deb")
+      done < <(printf '%s' "$pool" | jq -r '.tunnels[]?.publicAddr, .masterAddress? // empty' 2>/dev/null | grep -v '^$' | sort -u)
+    fi
+  fi
+  # 2) 腾讯官方 CDN（隧道全不可达时迅速切换）
+  candidates+=("$QQ_DEB_BASE/linuxqq_${QQ_VERSION}_${arch}.deb")
+  # 3) 官方文档页动态抓取
   local dyn
-  dyn=$(curl -fsSL --max-time 30 -A "Mozilla/5.0" "$QQ_DOC_PAGE" 2>/dev/null \
-    | grep -oE "https://qqdl\.gtimg\.cn/qqfile/QQNT/[^\"' ]*linuxqq_[0-9.-]+_${arch}\.deb" | head -1)
+  dyn=$(curl -fsSL --max-time 30 -A "Mozilla/5.0" "$QQ_DOC_PAGE" 2>/dev/null |
+    grep -oE "https://qqdl\.gtimg\.cn/qqfile/QQNT/[^\"' ]*linuxqq_[0-9.-]+_${arch}\.deb" | head -1)
   [ -n "$dyn" ] && candidates+=("$dyn")
+  # 4) GIT Release 基线（最后兜底，国内直连慢）
+  candidates+=("$QQ_RELEASE_BASE/linuxqq_${QQ_VERSION}_${arch}.deb")
+  candidates+=("https://ghfast.top/${QQ_RELEASE_BASE}/linuxqq_${QQ_VERSION}_${arch}.deb")
   local u size
   for u in "${candidates[@]}"; do
     log_info "尝试下载: $u"
-    if curl -fL --retry 3 --connect-timeout 15 --max-time 900 -o "$tmp" "$u" 2>/dev/null; then
+    if curl -fL --retry 2 --connect-timeout 10 --max-time 1800 -o "$tmp" "$u" 2>/dev/null; then
       size=$(stat -c%s "$tmp" 2>/dev/null || echo 0)
       if [ "$size" -gt 50000000 ]; then
         log_ok "linuxqq 下载成功 ($((size/1024/1024))MB)"
