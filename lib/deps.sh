@@ -73,20 +73,33 @@ install_node() {
   fi
   if [ "$major" -ge 18 ] 2>/dev/null; then
     log_ok "Node.js $(node -v) 已就绪"
-  else
-    log_info "安装 Node.js 18.x（apt 默认版本过旧/缺失）"
-    apt_install nodejs npm
-    if command -v node >/dev/null 2>&1 && [ "$(node -v | sed 's/^v//' | cut -d. -f1)" -ge 18 ] 2>/dev/null; then
-      log_ok "Node.js $(node -v) 就绪"
-    else
-      # NodeSource 兜底（armbian/Ubuntu 自带 libnode-dev 与 nodejs 抢文件，先卸载冲突包 + force-overwrite）
-      curl -fsSL https://deb.nodesource.com/setup_18.x | bash - >/dev/null 2>&1 || true
-      apt-get remove -y libnode-dev libnode72 >/dev/null 2>&1 || true
-      DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::="--force-overwrite" nodejs \
-        || die "Node.js 安装失败，请手动安装 >= 18"
-      log_ok "Node.js $(node -v) 就绪（NodeSource）"
-    fi
+    return 0
   fi
+  # [修复] dpkg 认为已注册但二进制缺失（半卸载/手删文件）→ reinstall 直接补齐
+  if dpkg -s nodejs >/dev/null 2>&1; then
+    log_info "nodejs 包已注册但二进制缺失 → reinstall 补齐"
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --reinstall -o Dpkg::Options::="--force-overwrite" nodejs >/dev/null 2>&1 || true
+    if command -v node >/dev/null 2>&1 && [ "$(node -v | sed 's/^v//' | cut -d. -f1)" -ge 18 ] 2>/dev/null; then
+      log_ok "Node.js $(node -v) 就绪（reinstall 补齐）"
+      return 0
+    fi
+    # 包状态冲突（如 nodesource nodejs 与发行版 npm 抢依赖）→ 连 npm 一起清干净重装
+    log_warn "nodejs 包状态异常（冲突/半装），清除后重装..."
+    DEBIAN_FRONTEND=noninteractive apt-get remove -y --purge nodejs npm libnode-dev libnode72 >/dev/null 2>&1 || true
+    DEBIAN_FRONTEND=noninteractive apt-get autoremove -y >/dev/null 2>&1 || true
+  fi
+  # 注意：不要 apt_install "nodejs npm" —— 发行版 npm 与 nodesource nodejs 冲突；nodesource nodejs 自带 npm
+  apt_install nodejs
+  if command -v node >/dev/null 2>&1 && [ "$(node -v | sed 's/^v//' | cut -d. -f1)" -ge 18 ] 2>/dev/null; then
+    log_ok "Node.js $(node -v) 就绪"
+    return 0
+  fi
+  # NodeSource 兜底（armbian/Ubuntu 自带 libnode-dev 与 nodejs 抢文件，先卸载冲突包 + force-overwrite）
+  curl -fsSL https://deb.nodesource.com/setup_18.x | bash - >/dev/null 2>&1 || true
+  apt-get remove -y libnode-dev libnode72 >/dev/null 2>&1 || true
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::="--force-overwrite" nodejs \
+    || die "Node.js 安装失败，请手动安装 >= 18"
+  log_ok "Node.js $(node -v) 就绪（NodeSource）"
 }
 
 install_pm2() {
