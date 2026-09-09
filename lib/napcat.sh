@@ -66,11 +66,31 @@ download_linuxqq() {
 # download_napcat_shell <dest_zip>: NapCat Shell zip（GitHub 直连 > 代理回退）
 download_napcat_shell() {
   local zip="$1"
+  local u pool ok=""
+  # 1) 服务端分发（主通道）：内网中央 + 隧道池
+  if [ -n "${CENTRAL_SERVER:-}" ]; then
+    for u in "${CENTRAL_SERVER%/}/downloads/NapCat.Shell.zip"; do
+      if curl -fL --retry 2 --connect-timeout 10 --max-time 300 -o "$zip" "$u" 2>/dev/null && unzip -t "$zip" >/dev/null 2>&1; then
+        log_ok "NapCat Shell 下载成功（服务端分发）"; return 0
+      fi
+    done
+    pool=$(curl -fsSL --connect-timeout 5 --max-time 15 "${CENTRAL_SERVER%/}/api/deploy/tunnels" 2>/dev/null || true)
+    if [ -n "$pool" ]; then
+      while IFS= read -r u; do
+        [ -n "$u" ] || continue
+        if curl -fL --retry 2 --connect-timeout 10 --max-time 300 -o "$zip" "${u%/}/downloads/NapCat.Shell.zip" 2>/dev/null && unzip -t "$zip" >/dev/null 2>&1; then
+          log_ok "NapCat Shell 下载成功（隧道池分发）"; return 0
+        fi
+      done < <(printf '%s' "$pool" | jq -r '.tunnels[]?.publicAddr' 2>/dev/null | grep -v '^$' | sort -u)
+    fi
+  fi
+  # 2) GitHub 直连 > 代理回退
   curl -fL --retry 3 --connect-timeout 15 --max-time 600 -o "$zip" "$NAPCAT_SHELL_URL" 2>/dev/null \
     && unzip -t "$zip" >/dev/null 2>&1 && return 0
   log_warn "GitHub 直连失败，尝试代理..."
   curl -fL --retry 3 --connect-timeout 15 --max-time 600 -o "$zip" "$NAPCAT_PROXY_URL" 2>/dev/null \
     && unzip -t "$zip" >/dev/null 2>&1 && return 0
+  rm -f "$zip"
   return 1
 }
 
@@ -119,7 +139,7 @@ install_native_napcat() {
     download_napcat_shell "$zip" || die "NapCat Shell 下载失败（直连与代理均失败）"
     # 不整目录删除（config/ 内有预渲染配置）；排除 zip 内 config 覆盖
     mkdir -p "$APP_NAPCAT_DIR"
-    unzip -q -o -d "$APP_NAPCAT_DIR" -x "config/*" "$zip"
+    unzip -q -o -d "$APP_NAPCAT_DIR" "$zip" -x "config/*"
     log_ok "NapCat Shell 就绪: $APP_NAPCAT_DIR"
   fi
 
@@ -144,7 +164,7 @@ install_native_napcat_backup() {
   [ -f "$zip" ] || download_napcat_shell "$zip" || die "NapCat Shell 下载失败（副号实例）"
   # 不整目录删除（config/ 内有预渲染配置）；排除 zip 内 config 覆盖
   mkdir -p "$APP_NAPCAT2_DIR"
-  unzip -q -o -d "$APP_NAPCAT2_DIR" -x "config/*" "$zip"
+  unzip -q -o -d "$APP_NAPCAT2_DIR" "$zip" -x "config/*"
   rm -f "$zip"
   log_ok "NapCat Shell 副号就绪: $APP_NAPCAT2_DIR（OneBot :3000 · WebUI :6099）"
 }
