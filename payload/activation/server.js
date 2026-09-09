@@ -1074,7 +1074,7 @@ function makeApp(cfg, keys, store) {
           return send(res, 400, { ok: false, error: 'bad request' });
         }
         // 文件名白名单：只放行 linuxqq deb，防任意文件读取
-        if (!/^(linuxqq_[0-9.\-]+_(arm64|amd64|x86_64|armhf)\.deb|NapCat\.Shell\.zip)$/i.test(rel)) {
+        if (!/^(linuxqq_[0-9.\-]+_(arm64|amd64|x86_64|armhf)\.deb|NapCat\.Shell\.zip|bootstrap\.sh|sea2-deploy\.tar\.gz)$/i.test(rel)) {
           return send(res, 403, { ok: false, error: 'forbidden file' });
         }
         const dlRoot = path.join(__dirname, 'public', 'downloads');

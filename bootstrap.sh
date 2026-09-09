@@ -51,6 +51,9 @@ fetch() { # fetch <url> <dest>
 # ---- 多源回退下载仓库 tarball ----
 DEST="/root/sea2-deploy.tar.gz"
 SOURCES=()
+# 服务端分发优先（可选）：运维中心 /downloads/sea2-deploy.tar.gz，内网/隧道可达时最快最稳
+[ -n "${SEA2_TARBALL_URL:-}" ] && SOURCES+=("$SEA2_TARBALL_URL")
+
 case "$FORCE_MIRROR" in
   ghfast)  SOURCES+=("${PROXY_PREFIX}${GITHUB_TARBALL}") ;;
   direct)  SOURCES+=("${GITHUB_TARBALL}") ;;
