@@ -38,6 +38,11 @@ init_runtime_dirs() {
   fi
   # fleet 设备指纹（运维中心绑定用）：必须在 sea1-client 启动前确定性落地。
   # 否则 client-agent 走回退分支自造随机指纹 → 重装后 machine_id 漂移 → 心跳 machine-mismatch。
+  # 默认保留（重装不换身份，避免授权漂移）；SEA2_RESET_MACHINE_ID=1 → 强制按全新设备重新注册。
+  if [ "${SEA2_RESET_MACHINE_ID:-0}" = "1" ]; then
+    rm -f /etc/sea1-x86/machine-id /etc/sea1-x86/client-code
+    log_warn "SEA2_RESET_MACHINE_ID=1 → 已清除旧设备指纹与 client-code，本次按全新设备注册"
+  fi
   if [ ! -f /etc/sea1-x86/machine-id ]; then
     mkdir -p /etc/sea1-x86
     gen_hex 32 > /etc/sea1-x86/machine-id

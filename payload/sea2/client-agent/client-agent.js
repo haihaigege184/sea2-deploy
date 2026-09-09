@@ -3,6 +3,13 @@
  * sea2 fleet-client —— 让真实的 sea1 bot（镜像到 /root/sea2）在控制台集群 Tab 中
  * 以"真实 X86 客户端"身份出现。复用 bot 的真实机器码 /etc/sea1/machine-id。
  * 仅负责 activate + 周期 heartbeat（与 bot 自身的 license 心跳互补，不冲突）。
+ *
+ * [2026-09-09 全新环境修复]
+ * 旧实现在无 code 时直接发 code=null 的正式心跳 → 中央 server.js:304
+ * `isTrialHeartbeat && body.trial !== true` → 400 trial-required → 该设备永远不出现在集群页。
+ * 全新环境（/etc/sea1-x86/client-code 不存在）且未提供 SEA1_ADMIN_TOKEN 时必然踩中。
+ * 现改为：领取不到 code → 走设备维度试用（POST /api/trial/status 注册 + trial:true 心跳），
+ * 设备在集群页以「试用中」如实呈现，不再静默消失。
  */
 const crypto = require('crypto');
 const fs = require('fs');
@@ -21,6 +28,9 @@ const REGION = 'cn-east';
 const PRINTERS = [{ name: 'X86-Sea1-Client', status: 'online' }];
 // 与 bot(licensing/lib/machineId.js) 完全一致：HMAC_SHA256(persistent, SECRET_SEED)
 const SECRET_SEED = 'sea1-machine-seed-v1-replace-in-obfuscated-build';
+const BOOT_TIME = Date.now();
+// 无 code 时重尝试领码的节流间隔（领取会在中央生成新码，禁止高频刷）
+const REGRANT_INTERVAL_MS = 30 * 60 * 1000;
 
 function getMachineId() {
   // ① 专用文件优先：内容为 64 位 hex → 直接返回；UUID → HMAC 派生
@@ -47,6 +57,12 @@ function getCode() {
   if (fs.existsSync(CODE_PATH)) return fs.readFileSync(CODE_PATH, 'utf8').trim();
   return null;
 }
+function saveCode(code) {
+  try {
+    fs.mkdirSync(require('path').dirname(CODE_PATH), { recursive: true });
+    fs.writeFileSync(CODE_PATH, code, { mode: 0o600 });
+  } catch (e) { console.log('[sea2-fleet] 保存 code 失败', e.message); }
+}
 function req(method, path, body, headers) {
   return new Promise((resolve, reject) => {
     const url = new URL(SERVER + path);
@@ -65,6 +81,7 @@ function req(method, path, body, headers) {
   });
 }
 async function grantCode() {
+  if (!ADMIN_TOKEN) return null; // 无运维令牌：不尝试，直接走试用
   try {
     const r = await req('POST', '/api/admin/console/grant', { qq: '1000000001', plan: 'quarter' }, { 'x-admin-token': ADMIN_TOKEN });
     const j = JSON.parse(r.body || '{}');
@@ -74,13 +91,23 @@ async function grantCode() {
     return null;
   }
 }
+// 设备维度试用注册（查询即授予，中央公开端点）
+async function registerTrial(mid) {
+  try {
+    const r = await req('POST', '/api/trial/status', { machine_id: mid });
+    const j = JSON.parse(r.body || '{}');
+    return j.ok === true;
+  } catch (e) {
+    console.log('[sea2-fleet] trial 注册失败', e.message);
+    return false;
+  }
+}
 async function activate(mid, code) {
   return req('POST', '/api/activate', { machine_id: mid, code });
 }
-async function heartbeat(mid, code) {
-  const payload = {
+function buildPayload(mid, code) {
+  const base = {
     machine_id: mid,
-    code,
     nonce: crypto.randomBytes(8).toString('hex'),
     online: true,
     version: VERSION,
@@ -88,18 +115,22 @@ async function heartbeat(mid, code) {
     public_ip: '',
     cpu_usage: 0,
     mem_usage: 0,
-    boot_time: Date.now(),
+    boot_time: BOOT_TIME,
     client_ts: Date.now(),
     printers: PRINTERS,
   };
-  return req('POST', '/api/heartbeat', payload);
+  // 无 code → 试用心跳（中央要求 body.trial === true，否则 400 trial-required）
+  return code ? Object.assign(base, { code }) : Object.assign(base, { trial: true });
+}
+async function heartbeat(mid, code) {
+  return req('POST', '/api/heartbeat', buildPayload(mid, code));
 }
 (async () => {
   const mid = getMachineId();
   let code = getCode();
   if (!code) {
     code = await grantCode();
-    if (code) fs.writeFileSync(CODE_PATH, code);
+    if (code) saveCode(code);
   }
   if (code) {
     try {
@@ -108,14 +139,31 @@ async function heartbeat(mid, code) {
     } catch (e) {
       console.log('[sea2-fleet] activate err', e.message);
     }
+    console.log('[sea2-fleet] machine_id=%s code=%s', mid, code);
+  } else {
+    const ok = await registerTrial(mid);
+    console.log('[sea2-fleet] 无 client-code（全新环境/未提供 SEA1_ADMIN_TOKEN）→ 设备维度试用注册%s；machine_id=%s',
+      ok ? '成功' : '失败', mid);
   }
-  console.log('[sea2-fleet] machine_id=%s code=%s', mid, code);
   await heartbeat(mid, code).catch(() => {});
+
+  let lastGrantTry = Date.now();
   setInterval(async () => {
     try {
+      // 试用态下节流重尝试领码（运维中心补发令牌后无需重启即可升正式）
+      if (!code && ADMIN_TOKEN && Date.now() - lastGrantTry > REGRANT_INTERVAL_MS) {
+        lastGrantTry = Date.now();
+        const c2 = await grantCode();
+        if (c2) {
+          code = c2;
+          saveCode(code);
+          await activate(mid, code).catch(() => {});
+          console.log('[sea2-fleet] 已领取正式 code=%s', code);
+        }
+      }
       const r = await heartbeat(mid, code);
       const j = JSON.parse(r.body || '{}');
-      console.log('[sea2-fleet] heartbeat valid=%s reason=%s', j.valid, j.reason);
+      console.log('[sea2-fleet] heartbeat valid=%s reason=%s status=%s', j.valid, j.reason, r.status);
     } catch (e) {
       console.log('[sea2-fleet] heartbeat err', e.message);
     }
