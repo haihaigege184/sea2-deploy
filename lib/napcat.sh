@@ -137,8 +137,8 @@ install_native_napcat_backup() {
 
 # detect_napcat_mode: 依内存决定主副方案（客户端/服务端通用）
 detect_napcat_mode() {
-  if [ "$NAPCAT_MODE" = "force-native" ]; then NAPCAT_DEPLOY_MODE="native"; return 0; fi
-  if [ "$NAPCAT_MODE" = "force-docker" ]; then NAPCAT_DEPLOY_MODE="docker"; return 0; fi
+  if [ "${NAPCAT_MODE:-}" = "force-native" ]; then NAPCAT_DEPLOY_MODE="native"; return 0; fi
+  if [ "${NAPCAT_MODE:-}" = "force-docker" ]; then NAPCAT_DEPLOY_MODE="docker"; return 0; fi
   local mem_kb
   mem_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
   if [ "$mem_kb" -ge $((8*1024*1024)) ]; then
