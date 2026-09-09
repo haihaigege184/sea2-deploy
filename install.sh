@@ -4,7 +4,7 @@
 #
 # 能力：
 #   · 未安装 → 智能交互式全新部署：依赖 → 代码 → 配置 → 原生NapCat(主) +
-#     docker NapCat(副) → pm2 服务栈 → 健康检查 → 成功输出
+#     原生 NapCat 双实例(副) → pm2 服务栈 → 健康检查 → 成功输出
 #   · 已安装 → 检查 / 维护 / 更新 菜单
 #
 # 用法：
@@ -15,7 +15,7 @@
 #
 # 部署布局（与生产 10.0.0.11 完全一致）：
 #   /root/sea2                    主系统（sea2-bot 原生 NapCat :4000）
-#   /root/sea1                    副系统（sea1-bot，docker NapCat :3000）
+#   /root/sea1                    副系统（sea1-bot，原生 NapCat 双实例 :3000）
 #   /root/sea1-activation-server  激活授权服务 :3457
 #   /app/napcat                   NapCat Shell（主号注入）
 # ==========================================================================
@@ -69,7 +69,7 @@ banner() {
  \___ \| |_) / /   | | | || | | || | | |
   ___) |  __/ /    | |_| || |_| || |_| |
  |____/|_|  /_/     \___/ |____/  \___/
-     SEA2 双系统一键部署 · NapCat + pm2 + systemd/docker
+     SEA2 双系统一键部署 · NapCat 双原生 + pm2
 ART
   printf '%b\n' "$C_OFF"
 }
@@ -103,7 +103,7 @@ log_step "部署向导（回车采用默认值）"
 ask MAIN_QQ      "1/6 主号 QQ（主系统 sea2-bot，原生 NapCat :4000 登录的号）" ""
 [[ "$MAIN_QQ" =~ ^[0-9]{5,12}$ ]] || die "主号 QQ 非法"
 
-ask BACKUP_QQ    "2/6 副号 QQ（副系统 docker NapCat :3000 登录的号，必须与主号不同）" ""
+ask BACKUP_QQ    "2/6 副号 QQ（副系统原生 NapCat 双实例 :3000 登录的号，必须与主号不同）" ""
 [[ "$BACKUP_QQ" =~ ^[0-9]{5,12}$ ]] || die "副号 QQ 非法"
 [ "$MAIN_QQ" != "$BACKUP_QQ" ] || die "主副号必须不同（共号会互踢）"
 WITH_BACKUP=1
@@ -151,7 +151,7 @@ echo
 log_info "================ 部署计划 ================"
 log_info "架构: $ARCH | 系统: $DISTRO"
 log_info "主号: $MAIN_QQ（原生 NapCat :4000，WebUI :6100）"
-log_info "副号: $BACKUP_QQ（docker NapCat :3000，WebUI :6099）"
+log_info "副号: $BACKUP_QQ（原生 NapCat 双实例 :3000，WebUI :6099）"
 log_info "管理员: $ADMIN_QQ | 通知群: ${NOTIFY_GROUPS:-（空）}"
 log_info "部署路径: $SEA2_DIR / $SEA1_DIR / $ACT_DIR"
 log_info "=========================================="
@@ -162,7 +162,7 @@ confirm "确认开始部署?" || die "已取消"
 install_base_deps
 install_node
 install_pm2
-install_docker
+# docker 仅旧版副号方案需要；双原生方案不再安装
 
 # ---------- 阶段 2：代码 + 运行目录 + 配置渲染（先渲染后装依赖，避免误扫 node_modules） ----------
 deploy_payload
@@ -177,9 +177,10 @@ log_ok "配置渲染完成（无残留占位符）"
 
 npm_install_all
 
-# ---------- 阶段 4：NapCat ----------
+# ---------- 阶段 4：NapCat（双原生：主副共用 QQ 二进制） ----------
+cleanup_legacy_docker_napcat
 install_native_napcat
-install_docker_napcat
+install_native_napcat_backup
 
 # ---------- 阶段 5：服务栈 ----------
 pm2_start_stack

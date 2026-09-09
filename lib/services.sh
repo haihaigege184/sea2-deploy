@@ -61,7 +61,7 @@ pm2_start_stack() {
   log_step "启动 pm2 服务栈"
 
   # 清理同名旧进程
-  pm2 delete sea2-bot sea1-bot sea2-watchdog sea2-print-server sea2-qr sea2-napcat sea1-activation >/dev/null 2>&1 || true
+  pm2 delete sea2-bot sea1-bot sea2-watchdog sea2-print-server sea2-qr sea2-napcat sea2-napcat-backup sea1-activation >/dev/null 2>&1 || true
 
   # 激活服务
   pm2 start "$ACT_DIR/server.js" --name sea1-activation --cwd "$ACT_DIR" \
@@ -73,8 +73,10 @@ pm2_start_stack() {
   pm2 start "$SEA2_DIR/ecosystem.sea2-print-server.config.js" >/dev/null
   # 扫码中间页
   pm2 start "$SEA2_DIR/ecosystem.qr.config.js" >/dev/null
-  # 原生 napcat（QQ 进程）
+  # 原生 napcat 主号（QQ 进程，OneBot :4000）
   pm2 start "$SEA2_DIR/napcat/run.sh" --name sea2-napcat --interpreter bash --time >/dev/null
+  # 原生 napcat 副号（与主号共用 QQ 二进制，NAPCAT_HOME=/app/napcat2，OneBot :3000）
+  pm2 start "$SEA2_DIR/napcat/run-backup.sh" --name sea2-napcat-backup --interpreter bash --time >/dev/null
   # 双向仲裁 watchdog
   pm2 start "$SEA2_DIR/sea2-watchdog/ecosystem.watchdog.config.js" >/dev/null
   # 副框架：注册但不启动（角色互斥，SEA2_ACTIVE 下保持 STOPPED）
@@ -90,6 +92,5 @@ pm2_setup_boot() {
   pm2 startup systemd -u root --hp /root >/dev/null 2>&1 || true
   pm2 save >/dev/null 2>&1 || true
   systemctl enable pm2-root >/dev/null 2>&1 || true
-  systemctl enable docker >/dev/null 2>&1 || true
-  log_ok "pm2 + docker 开机自启已配置"
+  log_ok "pm2 开机自启已配置"
 }

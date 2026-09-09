@@ -11,11 +11,7 @@ maint_status() {
   role="$(cat "$SEA2_DIR/run/framework.role" 2>/dev/null || echo '未知')"
   log_info "框架角色: $role"
   log_info "主号在线: $(curl -s --max-time 5 -H "Authorization: Bearer ${NAPCAT_TOKEN:-x}" http://127.0.0.1:4000/get_status 2>/dev/null | jq -r '.data.online // "未知"' 2>/dev/null)"
-  if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx napcat; then
-    log_info "副号在线: $(curl -s --max-time 5 -H "Authorization: Bearer ${NAPCAT_TOKEN:-x}" http://127.0.0.1:3000/get_status 2>/dev/null | jq -r '.data.online // "未知"' 2>/dev/null)"
-  else
-    log_warn "副号容器未运行"
-  fi
+  log_info "副号在线: $(curl -s --max-time 5 -H "Authorization: Bearer ${NAPCAT_TOKEN:-x}" http://127.0.0.1:3000/get_status 2>/dev/null | jq -r '.data.online // "未知"' 2>/dev/null)"
   echo
   log_info "端口: 激活3457 框架13001 副框架13000 打印13012 中间页13011 NapCat主4000/副3000 WebUI主6100/副6099"
 }
@@ -69,7 +65,7 @@ maint_config() {
   echo "  /root/sea1-activation-server/config.env  激活服务配置（支付密钥等）"
   echo "  /root/sea2/napcat/ops.env         中间页/运维 token"
   echo "  /app/napcat/config/               主号 NapCat 网络（onebot11_*.json）"
-  echo "  /root/napcat/config/              副号 NapCat 网络"
+  echo "  /app/napcat2/config/              副号 NapCat 网络（双原生方案）"
   echo
   log_info "改完配置后执行菜单[2]重启生效"
 }

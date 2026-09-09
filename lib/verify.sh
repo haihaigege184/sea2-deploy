@@ -45,8 +45,8 @@ run_verify() {
   check_http "扫码中间页 sea2-qr"       "http://127.0.0.1:13011/"
   check_napcat "主号原生 NapCat" 4000
 
-  if [ "$WITH_BACKUP" = "1" ] && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx napcat; then
-    check_napcat "副号 docker NapCat" 3000
+  if [ "$WITH_BACKUP" = "1" ]; then
+    check_napcat "副号原生 NapCat" 3000
   fi
 
   # pm2 进程状态

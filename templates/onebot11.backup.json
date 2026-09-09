@@ -20,7 +20,7 @@
       {
         "enable": true,
         "name": "sea1",
-        "url": "ws://172.17.0.1:9092/api/bot/qqws",
+        "url": "ws://127.0.0.1:9092/api/bot/qqws",
         "reportSelfMessage": true,
         "messagePostFormat": "array",
         "token": "__NAPCAT_TOKEN__",
@@ -32,7 +32,7 @@
       {
         "enable": true,
         "name": "sea2",
-        "url": "ws://172.17.0.1:9093/api/bot/qqws",
+        "url": "ws://127.0.0.1:9093/api/bot/qqws",
         "reportSelfMessage": true,
         "messagePostFormat": "array",
         "token": "__NAPCAT_TOKEN__",

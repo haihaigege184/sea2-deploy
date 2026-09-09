@@ -25,7 +25,7 @@ INSTALL_TIME=2026-09-09T00:00:00Z
 
 # ---- 组装部署树 ----
 TPL="$REPO/templates"
-mkdir -p sea2/napcat sea1 act appnap/config rootnap/config
+mkdir -p sea2/napcat sea1 act appnap/config appnap2/config
 cp "$TPL/sea2.config.json.tmpl"   sea2/config.json
 cp "$TPL/sea1.config.json.tmpl"   sea1/config.json
 cp "$TPL/activation.config.env"   act/config.env
@@ -35,14 +35,14 @@ cp "$TPL/ecosystem.sea2-bot.config.js"         sea2/ecosystem.sea2-bot.config.js
 cp "$TPL/ecosystem.watchdog.config.js"         sea2/watchdog.eco.js
 cp "$TPL/onebot11.main.json"      appnap/config/onebot11_${MAIN_QQ}.json
 cp "$TPL/webui.main.json"         appnap/config/webui.json
-cp "$TPL/onebot11.docker.json"    rootnap/config/onebot11_${BACKUP_QQ}.json
-cp "$TPL/webui.docker.json"       rootnap/config/webui.json
+cp "$TPL/onebot11.backup.json"    appnap2/config/onebot11_${BACKUP_QQ}.json
+cp "$TPL/webui.backup.json"       appnap2/config/webui.json
 
 # ---- 渲染 + 校验 ----
 render_tree sea2; render_tree sea1; render_tree act
-render_tree appnap/config; render_tree rootnap/config
+render_tree appnap/config; render_tree appnap2/config
 verify_no_placeholder sea2; verify_no_placeholder sea1; verify_no_placeholder act
-verify_no_placeholder appnap; verify_no_placeholder rootnap
+verify_no_placeholder appnap; verify_no_placeholder appnap2
 echo "[PASS] 渲染完整（无占位符残留）"
 
 # ---- payload 同树渲染演练（真实安装路径：payload 代码一起渲染） ----
@@ -59,7 +59,7 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='repla
 W = sys.argv[1]
 for f in ['sea2/config.json','sea1/config.json',
           'appnap/config/onebot11_111111111.json','appnap/config/webui.json',
-          'rootnap/config/onebot11_222222222.json','rootnap/config/webui.json']:
+          'appnap2/config/onebot11_222222222.json','appnap2/config/webui.json']:
     json.load(open(os.path.join(W,f), encoding='utf-8')); print('JSON OK:', f)
 cfg = json.load(open(os.path.join(W,'sea2/config.json'), encoding='utf-8'))
 assert cfg['superAdmin']=='333333333' and cfg['notify_groups']==['444444444']
@@ -74,13 +74,13 @@ ob = json.load(open(os.path.join(W,'appnap/config/onebot11_111111111.json'), enc
 assert ob['network']['httpServers'][0]['port']==4000
 assert ob['network']['websocketClients'][0]['url'].endswith(':9093/api/bot/qqws')
 assert ob['network']['websocketClients'][0]['token']=='wstoken0123456789abcdef'
-obd = json.load(open(os.path.join(W,'rootnap/config/onebot11_222222222.json'), encoding='utf-8'))
+obd = json.load(open(os.path.join(W,'appnap2/config/onebot11_222222222.json'), encoding='utf-8'))
 assert len(obd['network']['websocketClients'])==2
-assert obd['network']['websocketClients'][0]['url'].endswith('172.17.0.1:9092/api/bot/qqws')
-assert obd['network']['websocketClients'][1]['url'].endswith('172.17.0.1:9093/api/bot/qqws')
+assert obd['network']['websocketClients'][0]['url'].endswith('127.0.0.1:9092/api/bot/qqws')
+assert obd['network']['websocketClients'][1]['url'].endswith('127.0.0.1:9093/api/bot/qqws')
 w1 = json.load(open(os.path.join(W,'appnap/config/webui.json'), encoding='utf-8'))
 assert w1['autoLoginAccount']=='111111111' and w1['port']==6100
-w2 = json.load(open(os.path.join(W,'rootnap/config/webui.json'), encoding='utf-8'))
+w2 = json.load(open(os.path.join(W,'appnap2/config/webui.json'), encoding='utf-8'))
 assert w2['autoLoginAccount']=='222222222' and w2['port']==6099
 env = open(os.path.join(W,'act/config.env'), encoding='utf-8').read()
 assert 'testtoken0123456789abcdef' not in env

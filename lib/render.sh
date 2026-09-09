@@ -68,9 +68,10 @@ verify_no_placeholder() {
 # deploy_configs: 模板 → 目标位置 + 全树渲染
 deploy_configs() {
   local tpl="$TPL_DIR"
+  local app2="${APP_NAPCAT2_DIR:-/app/napcat2}"
 
-  # NapCat 配置目录先建好（原生 /app/napcat 在 install_native_napcat 才完整落地，但配置先行预置）
-  mkdir -p "$APP_NAPCAT_DIR/config" /root/napcat/config
+  # NapCat 配置目录先建好（原生 /app/napcat、/app/napcat2 后续由 napcat 安装步骤落地，但配置先行预置）
+  mkdir -p "$APP_NAPCAT_DIR/config" "$app2/config"
 
   install -m 644 "$tpl/sea2.config.json.tmpl"            "$SEA2_DIR/config.json"
   install -m 644 "$tpl/sea1.config.json.tmpl"            "$SEA1_DIR/config.json"
@@ -80,6 +81,7 @@ deploy_configs() {
   install -m 644 "$tpl/ecosystem.qr.config.js"           "$SEA2_DIR/ecosystem.qr.config.js"
   install -m 644 "$tpl/ops.env"                          "$SEA2_DIR/napcat/ops.env"
   install -m 644 "$tpl/napcat-http.env"                  "$SEA2_DIR/napcat/napcat-http.env"
+  install -m 755 "$tpl/run-backup.sh"                    "$SEA2_DIR/napcat/run-backup.sh"
   install -m 600 "$tpl/activation.config.env"            "$ACT_DIR/config.env"
 
   # NapCat 配置（预置网络，免重启绑定端口 —— 首次登录即生效）
@@ -87,15 +89,15 @@ deploy_configs() {
   install -m 644 "$tpl/webui.main.json"    "$APP_NAPCAT_DIR/config/webui.json"
   install -m 644 "$tpl/onebot11.main.json" "$APP_NAPCAT_DIR/config/onebot11_${MAIN_QQ}.json"
   if [ "$WITH_BACKUP" = "1" ]; then
-    install -m 644 "$tpl/napcat.json"        "/root/napcat/config/napcat.json"
-    install -m 644 "$tpl/webui.docker.json"  "/root/napcat/config/webui.json"
-    install -m 644 "$tpl/onebot11.docker.json" "/root/napcat/config/onebot11_${BACKUP_QQ}.json"
+    install -m 644 "$tpl/napcat.json"        "$app2/config/napcat.json"
+    install -m 644 "$tpl/webui.backup.json"  "$app2/config/webui.json"
+    install -m 644 "$tpl/onebot11.backup.json" "$app2/config/onebot11_${BACKUP_QQ}.json"
   fi
 
   render_tree "$SEA2_DIR"
   render_tree "$SEA1_DIR"
   render_tree "$ACT_DIR"
   render_tree "$APP_NAPCAT_DIR/config"
-  [ "$WITH_BACKUP" = "1" ] && render_tree "/root/napcat/config"
+  [ "$WITH_BACKUP" = "1" ] && render_tree "$app2/config"
   chmod 600 "$ACT_DIR/config.env" "$SEA2_DIR/napcat/ops.env" "$SEA2_DIR/napcat/napcat-http.env" 2>/dev/null || true
 }
