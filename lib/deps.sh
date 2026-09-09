@@ -4,9 +4,11 @@
 # ==========================================================================
 
 apt_install() {
-  DEBIAN_FRONTEND=noninteractive apt-get install -y "$@" >/dev/null 2>&1 || {
-    apt-get update -y >/dev/null 2>&1
-    DEBIAN_FRONTEND=noninteractive apt-get install -y "$@" >/dev/null
+  # 输出保留在安装日志中（失败可定位），不静默
+  DEBIAN_FRONTEND=noninteractive apt-get install -y "$@" || {
+    log_warn "apt install 失败，先 update 再重试..."
+    apt-get update -y
+    DEBIAN_FRONTEND=noninteractive apt-get install -y "$@"
   }
 }
 
@@ -38,10 +40,11 @@ install_node() {
     if command -v node >/dev/null 2>&1 && [ "$(node -v | sed 's/^v//' | cut -d. -f1)" -ge 18 ] 2>/dev/null; then
       log_ok "Node.js $(node -v) 就绪"
     else
-      # NodeSource 兜底
-      curl -fsSL https://deb.nodesource.com/setup_18.x | bash - >/dev/null 2>&1 \
-        && apt_install nodejs
-      command -v node >/dev/null 2>&1 || die "Node.js 安装失败，请手动安装 >= 18"
+      # NodeSource 兜底（armbian/Ubuntu 自带 libnode-dev 与 nodejs 抢文件，先卸载冲突包 + force-overwrite）
+      curl -fsSL https://deb.nodesource.com/setup_18.x | bash - >/dev/null 2>&1 || true
+      apt-get remove -y libnode-dev libnode72 >/dev/null 2>&1 || true
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::="--force-overwrite" nodejs \
+        || die "Node.js 安装失败，请手动安装 >= 18"
       log_ok "Node.js $(node -v) 就绪（NodeSource）"
     fi
   fi

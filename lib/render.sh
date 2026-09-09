@@ -69,6 +69,9 @@ verify_no_placeholder() {
 deploy_configs() {
   local tpl="$TPL_DIR"
 
+  # NapCat 配置目录先建好（原生 /app/napcat 在 install_native_napcat 才完整落地，但配置先行预置）
+  mkdir -p "$APP_NAPCAT_DIR/config" /root/napcat/config
+
   install -m 644 "$tpl/sea2.config.json.tmpl"            "$SEA2_DIR/config.json"
   install -m 644 "$tpl/sea1.config.json.tmpl"            "$SEA1_DIR/config.json"
   install -m 644 "$tpl/ecosystem.sea2-bot.config.js"     "$SEA2_DIR/ecosystem.sea2-bot.config.js"

@@ -3,10 +3,41 @@
 # lib/napcat.sh — 原生 NapCat（QQ NT + NapCat Shell 注入）与 docker napcat 安装
 # ==========================================================================
 
-QQ_DEB_BASE="${QQ_DEB_BASE:-https://qqdl.gtimg.cn/qqfile/QQNT/9.9.32/beta/727ce4e5}"
-QQ_VERSION="${QQ_VERSION:-3.2.30-50828}"
+QQ_DEB_BASE="${QQ_DEB_BASE:-https://qqdl.gtimg.cn/qqfile/QQNT/9.9.35/beta/1763096b}"
+QQ_VERSION="${QQ_VERSION:-3.2.33-52892}"
+QQ_DEB_URL="${QQ_DEB_URL:-}"   # 完整直链覆盖（最高优先级）
+QQ_DOC_PAGE="${QQ_DOC_PAGE:-https://docs.qq.com/doc/DVXNoRlpKaWhEY015}"  # 腾讯官方下载文档页（可动态抓最新直链）
 NAPCAT_SHELL_URL="${NAPCAT_SHELL_URL:-https://github.com/NapNeko/NapCatQQ/releases/latest/download/NapCat.Shell.zip}"
 NAPCAT_PROXY_URL="${NAPCAT_PROXY_URL:-https://ghfast.top/https://github.com/NapNeko/NapCatQQ/releases/latest/download/NapCat.Shell.zip}"
+
+# download_linuxqq <arch> <dest>: 多源回退下载 linuxqq deb（≥50MB 视为有效）
+#   优先级：QQ_DEB_URL 直链覆盖 > 固定已知可用源 > 官方文档页动态抓取
+download_linuxqq() {
+  local arch="$1" tmp="$2"
+  local candidates=()
+  [ -n "$QQ_DEB_URL" ] && candidates+=("$QQ_DEB_URL")
+  candidates+=("$QQ_DEB_BASE/linuxqq_${QQ_VERSION}_${arch}.deb")
+  local dyn
+  dyn=$(curl -fsSL --max-time 30 -A "Mozilla/5.0" "$QQ_DOC_PAGE" 2>/dev/null \
+    | grep -oE "https://qqdl\.gtimg\.cn/qqfile/QQNT/[^\"' ]*linuxqq_[0-9.-]+_${arch}\.deb" | head -1)
+  [ -n "$dyn" ] && candidates+=("$dyn")
+  local u size
+  for u in "${candidates[@]}"; do
+    log_info "尝试下载: $u"
+    if curl -fL --retry 3 --connect-timeout 15 --max-time 900 -o "$tmp" "$u" 2>/dev/null; then
+      size=$(stat -c%s "$tmp" 2>/dev/null || echo 0)
+      if [ "$size" -gt 50000000 ]; then
+        log_ok "linuxqq 下载成功 ($((size/1024/1024))MB)"
+        return 0
+      fi
+      log_warn "下载文件过小($size B)，视为损坏，换下一个源"
+    else
+      log_warn "下载失败，换下一个源"
+    fi
+    rm -f "$tmp"
+  done
+  return 1
+}
 
 # install_native_napcat: QQ 二进制 + NapCat Shell + 注入 patch
 install_native_napcat() {
@@ -21,9 +52,10 @@ install_native_napcat() {
 
   # ---- 1) QQ NT Linux（dpkg -x 解包，不注册系统包） ----
   if [ ! -x "$SEA2_DIR/napcat/QQ/qq" ]; then
-    local deb="linuxqq_${QQ_VERSION}_${DEB_ARCH}.deb" tmp="/tmp/$deb"
+    local deb="linuxqq_${QQ_VERSION}_${DEB_ARCH}.deb"
+    local tmp="/tmp/$deb"
     log_info "下载 linuxqq $QQ_VERSION ($DEB_ARCH) ..."
-    curl -fL --retry 3 -o "$tmp" "$QQ_DEB_BASE/$deb" || die "linuxqq 下载失败: $QQ_DEB_BASE/$deb"
+    download_linuxqq "$DEB_ARCH" "$tmp" || die "linuxqq 全部下载源均失败（可设 QQ_DEB_URL 指定直链后重试）"
     mkdir -p "$SEA2_DIR/napcat/_qqx"
     dpkg -x "$tmp" "$SEA2_DIR/napcat/_qqx"
     rm -rf "$SEA2_DIR/napcat/QQ"
@@ -64,6 +96,29 @@ install_native_napcat() {
   [ -d "$APP_NAPCAT_DIR" ] || die "$APP_NAPCAT_DIR 缺失"
 }
 
+# configure_docker_mirrors: docker.io 直连失败时写入国内镜像加速（幂等，已有配置则跳过）
+DOCKER_MIRRORS="${DOCKER_MIRRORS:-https://docker.1ms.run https://docker.m.daocloud.io https://docker.aityp.com}"
+configure_docker_mirrors() {
+  local dj=/etc/docker/daemon.json
+  if [ -f "$dj" ] && grep -q 'registry-mirrors' "$dj" 2>/dev/null; then
+    log_info "daemon.json 已含 registry-mirrors，沿用"
+    return 0
+  fi
+  mkdir -p /etc/docker
+  local arr tmp="/tmp/daemon.json.$$"
+  arr=$(printf '"%s"\n' $DOCKER_MIRRORS | jq -s -c .)
+  if [ -f "$dj" ]; then
+    backup_file "$dj"
+    jq --argjson m "$arr" '. + {"registry-mirrors": $m}' "$dj" > "$tmp" || { rm -f "$tmp"; return 1; }
+  else
+    printf '{"registry-mirrors": %s}\n' "$arr" > "$tmp"
+  fi
+  mv "$tmp" "$dj"
+  systemctl restart docker 2>/dev/null || service docker restart 2>/dev/null || true
+  sleep 3
+  docker info 2>/dev/null | grep -q 'Registry Mirrors' && log_ok "docker 镜像加速已配置" || log_warn "docker 重启后未见镜像加速（继续尝试）"
+}
+
 # install_docker_napcat: 副系统 docker napcat（预置网络配置后启动）
 install_docker_napcat() {
   log_step "部署副系统 docker napcat"
@@ -73,7 +128,11 @@ install_docker_napcat() {
     log_ok "容器 napcat 已存在，跳过创建"
   else
     log_info "拉取镜像 mlikiowa/napcat-docker:latest（多架构）..."
-    docker pull mlikiowa/napcat-docker:latest || die "napcat-docker 镜像拉取失败"
+    docker pull mlikiowa/napcat-docker:latest || {
+      log_warn "docker.io 直连失败，配置国内镜像加速后重试..."
+      configure_docker_mirrors
+      docker pull mlikiowa/napcat-docker:latest || die "napcat-docker 镜像拉取失败（含镜像加速）"
+    }
     docker run -d --name napcat \
       --restart=unless-stopped \
       -e NAPCAT_UID=0 -e NAPCAT_GID=0 \

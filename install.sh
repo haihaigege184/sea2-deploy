@@ -75,15 +75,11 @@ ART
 }
 
 # ---------- 模式判定 ----------
-if [ -f "$SEA2_DIR/sea.js" ] && pm2 ls 2>/dev/null | grep -q sea2-bot; then
+# "已安装" = 全新部署成功完成（收尾会写 .sea2-deploy-complete 标记）。
+# 中途失败（如镜像拉取中断）不会写标记 → 重跑继续走全新部署流程，幂等续装。
+if [ -f "$SEA2_DIR/sea.js" ] && [ -f "$SEA2_DIR/.sea2-deploy-complete" ]; then
   banner
   log_warn "检测到本机已安装 SEA2 双系统 → 进入【检查 / 维护】模式"
-  maint_menu
-  exit 0
-fi
-if [ -f "$SEA2_DIR/sea.js" ]; then
-  banner
-  log_warn "检测到 /root/sea2 已存在（pm2 未跑或未装完）→ 进入【检查 / 维护】模式"
   maint_menu
   exit 0
 fi
@@ -191,6 +187,9 @@ pm2_setup_boot
 
 # ---------- 阶段 6：健康检查 + 汇总 ----------
 run_verify || true
+
+# 写安装完成标记（下次运行 install.sh 进入维护模式的依据）
+date -Iseconds > "$SEA2_DIR/.sea2-deploy-complete"
 
 printf '%b' "$C_OK"
 cat <<SUM
