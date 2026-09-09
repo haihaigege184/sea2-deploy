@@ -61,7 +61,10 @@ pm2_start_stack() {
   log_step "启动 pm2 服务栈"
 
   # 清理同名旧进程
-  pm2 delete sea2-bot sea1-bot sea2-watchdog sea2-print-server sea2-qr sea2-napcat sea2-napcat-backup sea1-activation sea1-client >/dev/null 2>&1 || true
+  # pm2 delete 多名参数遇缺失名会中止整条删除 → 必须逐名删除（实机检验抓到）
+  for _n in sea2-bot sea1-bot sea2-watchdog sea2-print-server sea2-qr sea2-napcat sea2-napcat-backup sea1-activation sea1-client; do
+    pm2 delete "$_n" >/dev/null 2>&1 || true
+  done
 
   # 激活服务（仅服务端模式；客户端模式连中央服务端，本机不部署）
   if [ "${DEPLOY_MODE:-server}" = "server" ]; then
