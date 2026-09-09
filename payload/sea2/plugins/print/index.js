@@ -69,6 +69,9 @@ class PrintPlugin extends BasePlugin {
         this.configPath = path.join(__dirname, '../../config.json');
         // 激活服务地址来源（license 子配置中的 activationServer；解析见 _actServer）
         this._licenseCfg = {};
+        // [打印门禁] 权限判定缓存（userId -> {allow, expireAt}）+ 豁免群通知节流（groupId -> ts）
+        this._printPermCache = new Map();
+        this._graceNotifyAt = new Map();
         
         this.SUB = {
             CUTS: 'WAITING_CUTS',
@@ -293,6 +296,91 @@ class PrintPlugin extends BasePlugin {
         } catch (e) {
             console.warn('[Print] 首印提醒异常（已忽略）:', (e && e.message) || e);
         }
+    }
+
+    /**
+     * [打印门禁] 服务端不可达豁免通知（按群节流，10 分钟最多一次）。
+     * @param {string} groupId
+     */
+    async _notifyGraceMode(groupId) {
+        try {
+            const now = Date.now();
+            const last = this._graceNotifyAt.get(groupId) || 0;
+            if (now - last < 10 * 60 * 1000) return;
+            this._graceNotifyAt.set(groupId, now);
+            await this.sendGroupMessage(groupId,
+                '⚠️ 服务端暂时不可达，本次打印按豁免策略放行\n' +
+                '（与会员到期豁免期同策略，服务端恢复后自动恢复校验）'
+            );
+        } catch (e) {
+            console.warn('[Print] 豁免通知失败（已忽略）:', (e && e.message) || e);
+        }
+    }
+
+    /**
+     * [打印门禁] 打印权限校验：先连服务端获取试用/会员资格，再放行打印。
+     * - 超管/开发者：直接放行
+     * - 服务端有记录且 active/converted（试用中或正式会员）：放行（结果缓存 10 分钟）
+     * - 无记录（首触）：调服务端授予账号维度试用，授予成功才放行（保证首触试用成功识别）
+     * - 已到期（expired）：拒绝并引导开通会员
+     * - 服务端不可达/响应异常：豁免放行 + 群内通知（节流），与会员到期豁免期同策略
+     * @param {Object} c 打印命令上下文（含 userId/groupId/isSuper/isDev）
+     * @returns {{allow:boolean, lines?:string[]}}
+     */
+    async _checkPrintPerm(c) {
+        const { userId, groupId, isSuper, isDev } = c;
+        if (isSuper || isDev) return { allow: true };
+        const now = Date.now();
+        const cached = this._printPermCache.get(userId);
+        if (cached && cached.expireAt > now && cached.allow) return { allow: true };
+
+        const server = this._actServer();
+        if (!server) return { allow: true }; // 未配置激活服务（纯单机）→ 不设门禁
+        const monitorToken = process.env.MONITOR_TOKEN || (this._licenseCfg && this._licenseCfg.monitorToken) || '';
+
+        let r = null;
+        try { r = await core.trialStatusByUin(server, userId); } catch (e) { r = null; }
+        const b = r && r.body;
+
+        if (!b || b.ok !== true) {
+            // 服务端不可达或响应异常 → 豁免放行 + 群内通知
+            console.warn('[Print] 门禁: 服务端不可达，豁免放行 uin=' + userId);
+            await this._notifyGraceMode(groupId);
+            return { allow: true };
+        }
+
+        if (b.exists && (b.status === 'active' || b.status === 'converted')) {
+            this._printPermCache.set(userId, { allow: true, expireAt: now + 10 * 60 * 1000 });
+            return { allow: true };
+        }
+
+        if (b.exists && b.status === 'expired') {
+            return { allow: false, lines: core.reminderText() };
+        }
+
+        if (!b.exists) {
+            // 首触：必须先在服务端登记试用权，成功才放行打印
+            let months = 3;
+            try {
+                const cfg = await core.getTrialConfig(server);
+                if (cfg && cfg.body && cfg.body.ok && cfg.body.months) months = cfg.body.months;
+            } catch (e) { /* 用默认 3 个月 */ }
+            let g = null;
+            try { g = await core.grantTrial(server, { uin: userId, months }, monitorToken); } catch (e) { g = null; }
+            if (g && g.body && g.body.ok) {
+                console.log('[Print] 门禁: 已为新用户 ' + userId + ' 授予 ' + months + ' 个月试用（首触）');
+                this._printPermCache.set(userId, { allow: true, expireAt: now + 10 * 60 * 1000 });
+                return { allow: true };
+            }
+            // 授予失败（试用已关闭/服务端异常）→ 视为不可达，走豁免
+            console.warn('[Print] 门禁: 首触授予失败，豁免放行 uin=' + userId);
+            await this._notifyGraceMode(groupId);
+            return { allow: true };
+        }
+
+        // 其他未知状态 → 豁免放行（宁纵勿枉，避免误伤会员）
+        await this._notifyGraceMode(groupId);
+        return { allow: true };
     }
 
     /**
@@ -1346,6 +1434,19 @@ class PrintPlugin extends BasePlugin {
         if (session.state && _modeEntryWords.includes(msg)) {
           if (session.timer) { try { clearTimeout(session.timer); } catch (e) {} session.timer = null; }
           session.state = null;
+        }
+
+        // [打印门禁] 实际提交打印内容（图/文件）或进入打印模式前，先校验服务端试用/会员资格
+        const _printSubmit = msg.includes('[CQ:image') || msg.includes('[CQ:file');
+        const _modeEntryHit = !session.state && this.commands.modeEntry.some((cmd) => {
+            try { return cmd.match(ctx); } catch (e) { return false; }
+        });
+        if (_printSubmit || _modeEntryHit) {
+            const gate = await this._checkPrintPerm(ctx);
+            if (!gate.allow) {
+                await this.sendGroupMessage(groupId, (gate.lines && gate.lines.join('\n')) || '[×] 暂无打印权限');
+                return true;
+            }
         }
 
         // Layer 2: 模式内分发
