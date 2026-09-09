@@ -74,7 +74,7 @@ install_native_napcat() {
 
   # 已装且注入完整则跳过
   if [ -x "$SEA2_NAPCAT_DIR/QQ/qq" ] && [ -f "$APP_NAPCAT_DIR/napcat.mjs" ] \
-     && grep -q 'loadNapCat' "$SEA2_NAPCAT_DIR/QQ/resources/app/package.json" 2>/dev/null; then
+     && grep -q 'loadNapCat' "$SEA2_NAPCAT_DIR/QQ/resources/app/package.json" 2>/dev/null      && grep -q 'NAPCAT_HOME' "$SEA2_NAPCAT_DIR/QQ/resources/app/loadNapCat.js" 2>/dev/null; then
     log_ok "原生 NapCat 主号已安装，跳过下载"
     return 0
   fi
@@ -99,9 +99,9 @@ install_native_napcat() {
     local zip="/tmp/NapCat.Shell.zip"
     log_info "下载 NapCat Shell ..."
     download_napcat_shell "$zip" || die "NapCat Shell 下载失败（直连与代理均失败）"
-    rm -rf "$APP_NAPCAT_DIR"
+    # 不整目录删除（config/ 内有预渲染配置）；排除 zip 内 config 覆盖
     mkdir -p "$APP_NAPCAT_DIR"
-    unzip -q -o -d "$APP_NAPCAT_DIR" "$zip"
+    unzip -q -o -d "$APP_NAPCAT_DIR" -x "config/*" "$zip"
     log_ok "NapCat Shell 就绪: $APP_NAPCAT_DIR"
   fi
 
@@ -124,9 +124,9 @@ install_native_napcat_backup() {
   [ -f "$APP_NAPCAT2_DIR/napcat.mjs" ] && { log_ok "NapCat Shell 副号已就绪: $APP_NAPCAT2_DIR"; return 0; }
   local zip="/tmp/NapCat.Shell.zip"
   [ -f "$zip" ] || download_napcat_shell "$zip" || die "NapCat Shell 下载失败（副号实例）"
-  rm -rf "$APP_NAPCAT2_DIR"
+  # 不整目录删除（config/ 内有预渲染配置）；排除 zip 内 config 覆盖
   mkdir -p "$APP_NAPCAT2_DIR"
-  unzip -q -o -d "$APP_NAPCAT2_DIR" "$zip"
+  unzip -q -o -d "$APP_NAPCAT2_DIR" -x "config/*" "$zip"
   rm -f "$zip"
   log_ok "NapCat Shell 副号就绪: $APP_NAPCAT2_DIR（OneBot :3000 · WebUI :6099）"
 }
