@@ -36,6 +36,13 @@ init_runtime_dirs() {
   if [ ! -f "$SEA2_DIR/client-code" ]; then
     gen_hex 16 > "$SEA2_DIR/client-code"
   fi
+  # fleet 设备指纹（运维中心绑定用）：必须在 sea1-client 启动前确定性落地。
+  # 否则 client-agent 走回退分支自造随机指纹 → 重装后 machine_id 漂移 → 心跳 machine-mismatch。
+  if [ ! -f /etc/sea1-x86/machine-id ]; then
+    mkdir -p /etc/sea1-x86
+    gen_hex 32 > /etc/sea1-x86/machine-id
+    chmod 600 /etc/sea1-x86/machine-id
+  fi
   # 框架角色：主系统在岗
   if [ ! -f "$SEA2_DIR/run/framework.role" ]; then
     echo 'SEA2_ACTIVE' > "$SEA2_DIR/run/framework.role"
