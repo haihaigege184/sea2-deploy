@@ -8,6 +8,7 @@
 QQ_DEB_BASE="${QQ_DEB_BASE:-https://qqdl.gtimg.cn/qqfile/QQNT/9.9.35/beta/1763096b}"
 QQ_VERSION="${QQ_VERSION:-3.2.33-52892}"
 QQ_DEB_URL="${QQ_DEB_URL:-}"   # 完整直链覆盖（最高优先级）
+QQ_RELEASE_BASE="${QQ_RELEASE_BASE:-https://github.com/haihaigege184/sea2-deploy/releases/download/qq-deb-v1}"  # GIT 基线版本（当前运行版快照，最稳定）
 QQ_DOC_PAGE="${QQ_DOC_PAGE:-https://docs.qq.com/doc/DVXNoRlpKaWhEY015}"  # 腾讯官方下载文档页（可动态抓最新直链）
 NAPCAT_SHELL_URL="${NAPCAT_SHELL_URL:-https://github.com/NapNeko/NapCatQQ/releases/latest/download/NapCat.Shell.zip}"
 NAPCAT_PROXY_URL="${NAPCAT_PROXY_URL:-https://ghfast.top/https://github.com/NapNeko/NapCatQQ/releases/latest/download/NapCat.Shell.zip}"
@@ -17,12 +18,14 @@ SEA1_NAPCAT_DIR="/root/sea1napcat"       # 副号 HOME
 APP_NAPCAT2_DIR="/app/napcat2"           # 副号 NapCat Shell
 
 # download_linuxqq <arch> <dest>: 多源回退下载 linuxqq deb（≥50MB 视为有效）
-#   优先级：QQ_DEB_URL 直链覆盖 > 固定已知可用源 > 官方文档页动态抓取
+#   优先级：QQ_DEB_URL 直链覆盖 > GIT Release 基线 > 腾讯官方 CDN > 官方文档页动态抓取
 download_linuxqq() {
   local arch="$1" tmp="$2"
   local candidates=()
   [ -n "$QQ_DEB_URL" ] && candidates+=("$QQ_DEB_URL")
-  candidates+=("$QQ_DEB_BASE/linuxqq_${QQ_VERSION}_${arch}.deb")
+  candidates+=("$QQ_RELEASE_BASE/linuxqq_${QQ_VERSION}_${arch}.deb")          # ① GIT 基线直连
+  candidates+=("https://ghfast.top/${QQ_RELEASE_BASE}/linuxqq_${QQ_VERSION}_${arch}.deb")  # ② GIT 基线（ghfast 加速）
+  candidates+=("$QQ_DEB_BASE/linuxqq_${QQ_VERSION}_${arch}.deb")              # ③ 腾讯官方 CDN
   local dyn
   dyn=$(curl -fsSL --max-time 30 -A "Mozilla/5.0" "$QQ_DOC_PAGE" 2>/dev/null \
     | grep -oE "https://qqdl\.gtimg\.cn/qqfile/QQNT/[^\"' ]*linuxqq_[0-9.-]+_${arch}\.deb" | head -1)

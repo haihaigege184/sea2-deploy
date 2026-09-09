@@ -13,8 +13,8 @@
 set -euo pipefail
 
 REPO_REF="${REPO_REF:-main}"
-GITHUB_RAW="https://raw.githubusercontent.com/__GITHUB_USER__/sea2-deploy/${REPO_REF}"
-GITHUB_TARBALL="https://codeload.github.com/__GITHUB_USER__/sea2-deploy/tar.gz/${REPO_REF}"
+GITHUB_RAW="https://raw.githubusercontent.com/haihaigege184/sea2-deploy/${REPO_REF}"
+GITHUB_TARBALL="https://codeload.github.com/haihaigege184/sea2-deploy/tar.gz/${REPO_REF}"
 PROXY_PREFIX="https://ghfast.top/"   # GitHub 加速前缀（国内直连失败时自动套用）
 
 C_G='\033[1;32m'; C_Y='\033[1;33m'; C_R='\033[1;31m'; C_B='\033[1;35m'; C_0='\033[0m'
