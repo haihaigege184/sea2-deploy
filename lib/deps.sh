@@ -143,17 +143,17 @@ configure_printer_auto() {
   sleep 2
   local uri want="$PRINTER_DEFAULT"
   # 从 lpinfo -v 抓设备 URI：usb:// 优先，其后 ipp://；关键字匹配（品牌名含于 want，如 HP）
-  uri=$(lpinfo -v 2>/dev/null | grep -E '^usb://' | head -1)
-  [ -z "$uri" ] && uri=$(lpinfo -v 2>/dev/null | grep -E '^(ipp|ipps|socket)://' | head -1)
+  uri=$(lpinfo -v 2>/dev/null | grep -E '^usb://' | head -1 || true)
+  if [ -z "$uri" ]; then uri=$(lpinfo -v 2>/dev/null | grep -E '^(ipp|ipps|socket)://' | head -1 || true); fi
   if [ -z "$uri" ]; then
     log_warn "未探测到 USB/网络打印机（lpinfo -v 无设备）。请接好打印机后重跑，或手动:"
     log_warn "  lpadmin -p ${want} -E -v <设备URI> -m everywhere"
     return 0
   fi
   # 关键字筛选：若 want 含品牌词（如 HP）且有匹配设备则用匹配的
-  local brand; brand=$(echo "$want" | grep -oE '^[A-Za-z]+' | head -1)
+  local brand; brand=$(echo "$want" | grep -oE '^[A-Za-z]+' | head -1 || true)
   if [ -n "$brand" ]; then
-    local m; m=$(lpinfo -v 2>/dev/null | grep -E '^usb://' | grep -i "$brand" | head -1)
+    local m; m=$(lpinfo -v 2>/dev/null | grep -E '^usb://' | grep -i "$brand" | head -1 || true)
     [ -n "$m" ] && uri="$m"
   fi
   log_info "探测到打印机: $uri → 注册队列 ${want}"
