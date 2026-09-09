@@ -26,6 +26,8 @@ die()  { printf "%b[err]%b %s\n" "$C_R" "$C_0" "$*" >&2; exit 1; }
 [ "$(id -u)" = "0" ] || die "请用 root 运行（sudo bash 或 sudo -i）"
 
 # ---- 参数 ----
+# 先保存全部参数：下方 while 循环会 shift 掉 $@，不保存则透传给 install.sh 时为空
+INSTALL_ARGS=("$@")
 FORCE_MIRROR=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -93,4 +95,8 @@ ok "仓库就绪: /root/sea2-deploy"
 
 # ---- 交给主安装脚本（智能判定：新装机=向导，已装=维护菜单）----
 log "启动安装向导..."
-exec bash /root/sea2-deploy/install.sh "$@"
+if [ ${#INSTALL_ARGS[@]} -gt 0 ]; then
+  exec bash /root/sea2-deploy/install.sh "${INSTALL_ARGS[@]}"
+else
+  exec bash /root/sea2-deploy/install.sh
+fi
