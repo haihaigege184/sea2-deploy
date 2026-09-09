@@ -1,0 +1,206 @@
+classDiagram
+    %% ===== 新增：Fleet 服务端 =====
+    class FleetStore {
+        <<独立存储：data/fleet.json + 内存索引>>
+        - clients: Map~machineId, ClientRecord~
+        - blacklist: Map~machineId, BlacklistEntry~
+        - anomalies: Map~id, Anomaly~
+        - ignored: Map~id, bool~
+        - flushTimer
+        +recordHeartbeat(mid, entry) void
+        +getClient(mid) ClientRecord
+        +listClients(filter) ClientView[]
+        +getHistory(mid) HeartbeatEntry[]
+        +getPrinters(mid) PrinterRep[]
+        +listAllPrinters(filter) PrinterRep[]
+        +addCommand(mid, cmd) Command
+        +getPendingCommands(mid) Command[]
+        +markAcked(cmdId) void
+        +listCommands(mid) Command[]
+        +timeoutScan(now) void
+        +addBlacklist(mid, reason, by) void
+        +isBlacklisted(mid) bool
+        +ignoreAnomaly(id) void
+        -scheduleFlush() void
+        -flush() void
+    }
+    class ClientRecord {
+        +machineId: string
+        +snapshot: Snapshot
+        +history: HeartbeatEntry[]
+        +printers: PrinterRep[]
+        +commands: Command[]
+        +anomalies: string[]
+    }
+    class Snapshot {
+        +machineId: string
+        +code: string
+        +qq: string
+        +version: string
+        +publicIp: string
+        +region: string
+        +cpuUsage: number
+        +memUsage: number
+        +bootTime: int
+        +clientTs: int
+        +lastHeartbeatAt: int
+        +online: bool
+        +status: 'online'|'offline'|'abnormal'|'blacklisted'|'normal'
+        +license: object
+    }
+    class PrinterRep {
+        +printerId: string
+        +name: string
+        +status: 'online'|'offline'|'paper_out'|'jam'|'error'
+        +paperLevel: int
+        +inkLevel: int
+        +lastPrintAt: int
+        +online: bool
+    }
+    class Command {
+        +id: string
+        +action: 'restart_client'|'disable_client'|'disable_printer'|'enable_printer'|'push_notice'|'push_config'
+        +payload: object
+        +status: 'pending'|'sent'|'acked'|'timeout'
+        +issuedAt: int
+        +sentAt: int
+        +ackedAt: int
+        +timeoutAt: int
+    }
+    class Anomaly {
+        +id: string
+        +rule: 'code_shared'|'expired_online'|'machine_mismatch'|'long_offline'|'freq_anomaly'
+        +machineId: string
+        +code: string
+        +severity: 'high'|'medium'|'low'
+        +detail: string
+        +firstSeen: int
+        +lastSeen: int
+        +status: 'open'|'resolved'|'ignored'
+        +disposition: 'revoke'|'blacklist'|'ignore'
+    }
+    class BlacklistEntry {
+        +machineId: string
+        +reason: string
+        +at: int
+        +by: string
+    }
+
+    class FleetApi {
+        <<lib/consoleApi.js 新增路由>>
+        +handleFleet(req, res, url, ctx)
+        -listClients()
+        -clientDetail(mid)
+        -listPrinters()
+        -listAnomalies()
+        -disposeAnomaly(id, action)
+        -issueCommand(mid, body)
+        -commandHistory(mid)
+    }
+    class FleetService {
+        <<lib/fleet.js 业务逻辑>>
+        +listClients(store, fleetStore, filter) ClientView[]
+        +clientDetail(...)
+        +listAllPrinters(...)
+        +issueCommand(store, fleetStore, mid, action, payload, operator) Command
+        +timeoutScan(fleetStore, now) void
+        +deriveStatus(record, cfg) string
+    }
+    class AnomalyEngine {
+        <<lib/anomaly.js 5 规则扫描>>
+        +scan(store, fleetStore, cfg) Anomaly[]
+        -ruleCodeShared(...)
+        -ruleExpiredOnline(...)
+        -ruleMachineMismatch(...)
+        -ruleLongOffline(...)
+        -ruleFreqAnomaly(...)
+    }
+    class FleetConfig {
+        <<lib/fleetConfig.js 阈值热读>>
+        +load() FleetThresholds
+        +save(patch) void
+    }
+
+    %% ===== 客户端（sea1/licensing）=====
+    class HeartbeatClient {
+        <<sea1/licensing/lib/heartbeat.js 扩展>>
+        +sendHeartbeat(url, payload)
+        -enrichPayload(sysinfo, printers)
+        -handleCommands(commands, handler)
+        -nextAckIds() string[]
+    }
+    class CommandHandler {
+        <<sea1/licensing/lib/command-handler.js>>
+        +handle(cmd, ctx) Result
+        -restartClient()
+        -disableClient()
+        -disablePrinter(pid)
+        -enablePrinter(pid)
+        -pushNotice(n)
+        -pushConfig(patch)
+    }
+    class PrinterProvider {
+        <<sea1/licensing/lib/printer-provider.js>>
+        +enumerate() PrinterRep[]
+    }
+    class SysInfo {
+        <<sea1/licensing/lib/sysinfo.js>>
+        +collect() {version, cpu, mem, bootTime}
+    }
+
+    %% ===== 复用：现有模块（不重写）=====
+    class Store {
+        <<现有 activation-server>>
+        +listLicenses() / listCodes()
+        +getCode() / updateCode()
+        +getOrder() / listOrders()
+    }
+    class ConfigManager {
+        <<现有 23 项 + 集群管理分组>>
+        +readConfig(cfg, store)
+        +writeConfig(opts)
+        +SCHEMA
+    }
+    class ConsoleAuth {
+        <<现有>>
+        +verifyAuth(req, cfg, minLevel) AuthResult
+    }
+    class ConsoleAudit {
+        <<现有>>
+        +logAction(entry)
+    }
+    class DeviceService {
+        <<现有 devices.js>>
+        +disable(store, mid) Result
+    }
+    class LicenseGate {
+        <<bot 侧，降级由心跳驱动>>
+    }
+
+    %% ===== 关系 =====
+    FleetApi ..> FleetService : 业务
+    FleetApi ..> ConsoleAuth : 鉴权
+    FleetApi ..> ConsoleAudit : 审计
+    FleetApi ..> FleetStore : 读写
+    FleetService ..> FleetStore : 读写
+    FleetService ..> Store : 读 license/code
+    FleetService ..> DeviceService : disable(revoke)
+    AnomalyEngine ..> FleetStore : 读客户端/写 anomalies
+    AnomalyEngine ..> Store : 读 license 过期
+    AnomalyEngine ..> FleetConfig : 取阈值
+    FleetService ..> FleetConfig : 取阈值
+    FleetStore ..> BlacklistEntry : 包含
+    ClientRecord *-- Snapshot
+    ClientRecord *-- PrinterRep
+    ClientRecord *-- Command
+    ClientRecord *-- HeartbeatEntry
+    Anomaly ..> BlacklistEntry : 可触发
+
+    HeartbeatClient ..> CommandHandler : 执行指令
+    HeartbeatClient ..> PrinterProvider : 枚举打印机
+    HeartbeatClient ..> SysInfo : 采集指标
+    CommandHandler ..> PrinterProvider : 禁用/启用
+    CommandHandler ..> LicenseGate : 本地降级
+
+    note for FleetStore "心跳写=内存 O(1)，debounce 落盘；\n黑名单/指令低频即时 flush"
+    note for CommandHandler "restart_client 在客户端本机 pm2 restart；\ndisable_client 复用服务端吊销 + 本地降级"

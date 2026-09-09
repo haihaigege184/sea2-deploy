@@ -1,0 +1,34 @@
+{
+  "botName": "SEA1_Bot",
+  "port": 13000,
+  "database": {
+    "path": "./database/db.sqlite"
+  },
+  "superAdmin": "__ADMIN_QQ__",
+  "developer": "__ADMIN_QQ__",
+  "ws_port": 9092,
+  "ws_path": "/api/bot/qqws",
+  "notify_groups": __NOTIFY_GROUPS_JSON__,
+  "printer": {
+    "default": "__PRINTER_DEFAULT__",
+    "printers": __PRINTERS_JSON__
+  },
+  "napcat_host": "127.0.0.1",
+  "napcat_port": 3000,
+  "napcat_token": "__NAPCAT_TOKEN__",
+  "demo_mode": __DEMO_MODE_JSON__,
+  "recall_enabled": false,
+  "license": {
+    "enabled": true,
+    "trialDays": 14,
+    "activationServer": "http://127.0.0.1:3457",
+    "machineIdPath": "/root/sea2/config/machine-id",
+    "licensePath": "/root/sea2/license.json",
+    "publicKeyPath": "/root/sea1/licensing/public.key",
+    "publicKey": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAssTrUTD+yFGAf7T3skK4\nz19Z19uK023jyUF+nhjy2cgxAwlklUg/DX6iWIgCEGWva/2quYs1Mcmtvr/zEr5o\nIzaEDh2OTok1se2lg2xMoPojpyMCvSYtkeKqi5hStjR8pnB6araLS5qk32FfaqAM\nE6vrHv9b+B2NxqV6+LaBQOnqtrXg76iWXEFvp+9iLbIsXzS06+Qelnwgh1XQUQ8V\nb+8BPN41/+0QRVG7PRB04F1S5HG7TjUzp73soAsgI31XXHCmzQAB3Dj+n99LDr69\nt3NeCVwTwKtfpii6mG9JHSHM8DDr4O7d0mgFTr0zrvcxbdObroCu8cBhERGpTeVi\nQQIDAQAB\n-----END PUBLIC KEY-----",
+    "monitorToken": "__MONITOR_TOKEN__",
+    "adminToken": "__LICENSE_ADMIN_TOKEN__",
+    "botNotifyToken": "__BOT_NOTIFY_TOKEN__"
+  },
+  "sysName": "SEA1"
+}

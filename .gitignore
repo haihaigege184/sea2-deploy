@@ -1,0 +1,6 @@
+# 本地工作素材与临时产物不入库
+_material/
+_packtmp/
+*.tar.gz
+.deploy-logs/
+*.log

@@ -1,0 +1,95 @@
+%% 时序图 1：扩展心跳 + 指令 pull + ack（向后兼容）
+sequenceDiagram
+    autonumber
+    actor Client as sea1 客户端(LicenseGate)
+    participant HB as heartbeat.js(富化)
+    participant Sys as sysinfo/printer-provider
+    participant API as activation-server<br/>(/api/heartbeat)
+    participant FS as FleetStore
+    participant CH as command-handler(客户端)
+
+    Client->>Sys: 采集 version/cpu/mem/boot + 枚举 printers[]
+    Sys-->>HB: Snapshot 字段 + printers[]
+    HB->>API: POST /api/heartbeat {machine_id, code, online, version,<br/>public_ip, region, cpu_usage, mem_usage, boot_time,<br/>client_ts, printers[], ack_id?}
+    API->>FS: recordHeartbeat(mid, enriched)<br/>+ markAcked(ack_id 若存在)
+    FS-->>API: snapshot 更新; pendingCommands
+    API-->>HB: 200 {ok, valid, reason,<br/>server_time, license?, commands:[...]}
+    HB->>CH: 逐条处理 commands[](restart/disable/notice/config)
+    CH-->>HB: 已执行 → 收集 ack_id 列表
+    Note over HB: 下次心跳带 ack_id[] 回执（标 acked）
+
+%% 时序图 2：管理员下发指令 → 客户端 ack（状态机）
+sequenceDiagram
+    autonumber
+    actor Admin as 管理员(console.js)
+    participant FE as console.js
+    participant API as activation-server<br/>(FleetApi)
+    participant Auth as ConsoleAuth
+    participant FL as FleetService
+    participant FS as FleetStore
+    participant Audit as ConsoleAudit
+    participant Bot as 外网客户端(下次心跳)
+
+    Admin->>FE: 集群详情 → 点「禁用打印机」
+    FE->>API: POST /api/admin/fleet/clients/:mid/command<br/>{action:'disable_printer', payload:{printer_id}} x-console-token
+    API->>Auth: verifyAuth(req, 2)
+    Auth-->>API: {ok:true, level>=2}
+    API->>FL: issueCommand(store, fleetStore, mid, action, payload, operator)
+    FL->>FS: addCommand(mid, {id, status:'pending', timeoutAt})
+    FS-->>FL: Command
+    FL->>Audit: logAction({action:'cmd-disable_printer', target:mid, dangerous:true})
+    FL-->>API: {ok, commandId, status:'pending'}
+    API-->>FE: 200 {ok, commandId}
+    FE-->>Admin: Toast「已下发，等待客户端确认」
+    Note over Bot: 下次心跳响应携 commands[] → status:'sent'
+    Bot->>FS: recordHeartbeat(ack_id=commandId)
+    FS->>FS: markAcked → status:'acked'
+    Note over Bot: 超时(2×interval)未 ack → timeoutScan 标 'timeout'
+
+%% 时序图 3：异常扫描 → 处置（revoke / blacklist / ignore）
+sequenceDiagram
+    autonumber
+    participant Timer as 定时扫描(fleetScanInterval)
+    participant AE as AnomalyEngine
+    participant FS as FleetStore
+    participant Store as Store
+    participant Admin as 管理员
+    participant API as FleetApi
+    participant Dev as DeviceService
+    participant Audit as ConsoleAudit
+    participant Bot as 外网客户端
+
+    Timer->>AE: scan(store, fleetStore, cfg)
+    AE->>Store: 读 license 过期 / code 绑定
+    AE->>FS: 读各 client snapshot/history/printers
+    AE-->>FS: 写入 anomalies[]（5 规则去重缓存）
+    Note over Admin: 打开「异常」Tab → GET /api/admin/fleet/anomalies
+    Admin->>API: POST .../anomalies/code_shared:mid/revoke
+    API->>Dev: disable(store, mid)  // 吊销 license
+    Dev-->>API: {ok, status:'revoked'}
+    API->>Audit: logAction({action:'anomaly-revoke', target:mid})
+    API-->>FS: anomaly.status='resolved', disposition='revoke'
+    Note over Bot: 下次心跳 reason='revoked' → LicenseGate 降级
+
+    Admin->>API: POST .../anomalies/machine_mismatch:mid/blacklist
+    API->>FS: addBlacklist(mid, reason, operator)  // 强制 flush 即时生效
+    API->>Audit: logAction({action:'anomaly-blacklist', target:mid})
+    Note over Bot: 下次心跳 reason='blacklisted' → 降级
+
+%% 时序图 4：Fleet 模拟器验证（无真机）
+sequenceDiagram
+    autonumber
+    actor Dev as 开发者
+    participant Sim as tools/fleet-simulator.js
+    participant API as activation-server
+    participant FE as console.js(UI 验收)
+
+    Dev->>Sim: node tools/fleet-simulator.js --n 500 --anomaly
+    loop 每 heartbeatInterval
+        Sim->>API: POST /api/heartbeat（富化字段 + printers[]）
+        API-->>Sim: {commands:[]}  // 模拟器执行并 ack
+    end
+    Dev->>FE: 打开 /console → 集群/打印机/异常
+    FE->>API: GET /api/admin/fleet/clients|printers|anomalies
+    API-->>FE: 聚合数据（含模拟异常样本）
+    FE-->>Dev: 验证 500 台规模下列表/筛选/异常处置

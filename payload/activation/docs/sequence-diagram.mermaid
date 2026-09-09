@@ -1,0 +1,82 @@
+%% 时序图 1：管理员在 console.html 点「开通会员」（从已支付订单一键签发会员）
+sequenceDiagram
+    autonumber
+    actor Admin as 管理员(console.html)
+    participant FE as console.js
+    participant API as activation-server<br/>(ConsoleApi)
+    participant Auth as ConsoleAuth
+    participant Ord as OrderConsoleService
+    participant Store as Store
+    participant CM as codes/license/keys
+    participant Audit as ConsoleAudit
+
+    Admin->>FE: 选订单 → 点「开通会员」
+    FE->>API: POST /api/admin/console/grant {order_id}<br/>x-console-token: <session>
+    API->>Auth: verifyAuth(req, minLevel=2)
+    Auth-->>API: {ok:true, level>=2}
+    API->>Store: getOrder(order_id)
+    Store-->>API: order(status=paid, qq, machine_id, plan)
+    API->>Ord: grantMember(store, keys, cfg, order_id)
+    Ord->>Store: 已签发?(order.code)
+    alt 已签发
+        Store-->>Ord: 返回既有 code+license
+    else 未签发
+        Ord->>CM: makeCodeRecord(plan→expires_at/features)
+        CM-->>Ord: code 记录
+        Ord->>CM: buildLicense(privateKey, {machine_id, code,...})
+        CM-->>Ord: license
+        Ord->>Store: createCode / saveLicense / updateCode(active)
+        Ord->>Store: attachCode(order_id, code) → status=issued
+    end
+    Ord-->>API: {ok, code, license, status}
+    API->>Audit: logAction({operator, action:'grant', target:qq})
+    API-->>FE: 200 {ok, code, license}
+    FE-->>Admin: Toast「已开通」+ 刷新订单表
+
+%% 时序图 2：管理员在 console.html 点「禁用设备」
+sequenceDiagram
+    autonumber
+    actor Admin as 管理员(console.html)
+    participant FE as console.js
+    participant API as activation-server<br/>(ConsoleApi)
+    participant Auth as ConsoleAuth
+    participant Dev as DeviceService
+    participant Store as Store
+    participant Bot as sea1-bot<br/>(客户端心跳)
+    participant Audit as ConsoleAudit
+
+    Admin->>FE: 设备列表 → 点「禁用」
+    FE->>API: POST /api/admin/devices/:machine_id/action<br/>{action:'disable'} x-console-token:<session>
+    API->>Auth: verifyAuth(req, minLevel=2)
+    Auth-->>API: {ok:true}
+    API->>Dev: disableDevice(store, machine_id)
+    Dev->>Store: 查 license(machine_id)→code
+    Dev->>Store: updateCode(code, {status:'revoked'})
+    Store-->>Dev: ok
+    Dev-->>API: {ok, machine_id, status:'revoked'}
+    API->>Audit: logAction({operator, action:'disable', target:machine_id})
+    API-->>FE: 200 {ok}
+    FE-->>Admin: Toast「已禁用，客户端下次心跳后降级」
+    Note over Bot: 下一次 /api/heartbeat → reason='revoked'<br/>→ LicenseGate 进入只读降级
+
+%% 时序图 3（补充）：N4 管理员「设置等级」跨进程写路径
+sequenceDiagram
+    autonumber
+    actor Admin as 管理员(console.html)
+    participant FE as console.js
+    participant API as activation-server<br/>(ConsoleApi)
+    participant PB as PermissionBridge(srv)
+    participant FS as 共享文件<br/>permission_inbox.jsonl
+    participant Bridge as permissionBridge(bot)
+    participant PS as PermissionService(bot)
+    participant DB as db.sqlite(N4)
+
+    Admin->>FE: 管理员管理 → 设 QQ 等级 L2
+    FE->>API: POST /api/admin/admins {qq, level:2}
+    API->>PB: enqueueAdminCommand({operator, action:'set', target, level})
+    PB->>FS: appendFile(JSON行)
+    FS-->>Bridge: fs.watch/轮询 触发
+    Bridge->>PS: setLevel(operator, target, 2)
+    PS->>DB: UPSERT user_permissions + audit
+    Bridge->>FS: 重写快照 permission_snapshot.json
+    Note over API: 下次 GET /api/admin/admins 读快照即见新等级

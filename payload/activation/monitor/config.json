@@ -1,0 +1,17 @@
+{
+  "activationServer": "http://127.0.0.1:3457",
+  "monitorToken": "",
+  "adminToken": "",
+  "billUrl": "https://consumeprod.alipay.com/record/advanced.htm",
+  "pollIntervalMs": 60000,
+  "chromePath": "",
+  "headless": true,
+  "headfulFirstLogin": false,
+  "authFile": ".alipay-auth.json",
+  "qrImageFile": "alipay-login-qr.png",
+  "orderPattern": "SEA1-\\d{8}-[A-Z0-9]{6}",
+  "amountTolerance": 0.01,
+  "loginTimeoutMs": 300000,
+  "qrSelector": "canvas, img.auth-code-img, .qr-img, [class*=\"qr\"]",
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+}

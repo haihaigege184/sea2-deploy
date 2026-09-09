@@ -1,0 +1,41 @@
+sequenceDiagram
+    actor OP as 运维员
+    participant FE as 前端 console.highrisk.js
+    participant API as ConsoleApi
+    participant HG as OpsHighrisk
+    participant AUD as OpsAuditStore
+    participant FS as FleetStore
+    participant CL as sea2 客户端
+    participant FMT as Sea2FormatCtl
+
+    OP->>FE: 进入「高危操作」专区（默认隐藏，L3 可见）
+    FE->>API: GET /api/admin/ops/highrisk/gate?mid=&level=disk
+    API->>HG: checkWhitelist(mid,'disk') + highriskEnabled?
+    HG-->>API: {allowed:true, confirmWord:'FORMAT-DISK', countdownSec:30, totpRequired:true}
+    API-->>FE: 门禁上下文（确认词/倒计时/验证码要求）
+    OP->>FE: 手输确认词 FORMAT-DISK（不可粘贴）
+    AD->>FE: 输入管理员 TOTP 验证码（6 位）
+    FE->>API: POST /api/admin/ops/highrisk/format {mid, level:'disk', confirm, totp}
+    API->>HG: verifyConfirmWord + verifyTotp(token, totpSecret) + 二次白名单
+    HG->>AUD: logHighrisk({status:'created', operator, confirmChecked, totpChecked, level})
+    HG->>FS: issueCommand(mid,'format_device',{level:'disk', countdownSec:30, nonce}, operator, highrisk:true)
+    FS-->>API: {commandId, recordId}
+    API-->>FE: {ok:true, recordId, commandId}
+    loop 心跳 pull
+        CL->>FS: heartbeat
+        FS-->>CL: commands=[format_device]
+    end
+    CL->>FMT: execute('disk', confirm, 30)
+    FMT->>FMT: 本地弹警告 + 30s 倒计时 + 本地二次确认（P4）
+    alt 本地确认
+        FMT->>FMT: wipeDisk() 执行
+        FMT-->>CL: {ok:true, result:{level:'disk', wiped:true, ts}}
+    else 本地拒绝/离线
+        FMT-->>CL: {ok:false, error:'local-rejected'}
+    end
+    CL->>FS: ack_results → markResult → acked/failed
+    FS->>HG: advance(recordId, {status:'done'|'failed', ackedAt, result})
+    HG->>AUD: logHighrisk({status:'done', commandId, result})
+    FE->>API: GET /api/admin/ops/highrisk/records?mid=
+    API-->>FE: 全链路审计（发起人/验证人/时间/设备/结果/前后快照）
+    FE-->>OP: 高危审计高亮展示

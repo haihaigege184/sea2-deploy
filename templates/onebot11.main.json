@@ -1,0 +1,46 @@
+{
+  "network": {
+    "httpServers": [
+      {
+        "enable": true,
+        "name": "文件服务器",
+        "host": "0.0.0.0",
+        "port": 4000,
+        "enableCors": true,
+        "enableWebsocket": true,
+        "messagePostFormat": "array",
+        "token": "__NAPCAT_TOKEN__",
+        "debug": true
+      }
+    ],
+    "httpSseServers": [],
+    "httpClients": [],
+    "websocketServers": [],
+    "websocketClients": [
+      {
+        "enable": true,
+        "name": "sea2",
+        "url": "ws://127.0.0.1:9093/api/bot/qqws",
+        "reportSelfMessage": true,
+        "messagePostFormat": "array",
+        "token": "__SEA2_WS_TOKEN__",
+        "debug": true,
+        "heartInterval": 30000,
+        "reconnectInterval": 30000,
+        "verifyCertificate": true
+      }
+    ],
+    "plugins": []
+  },
+  "musicSignUrl": "",
+  "enableLocalFile2Url": false,
+  "parseMultMsg": false,
+  "imageDownloadProxy": "",
+  "timeout": {
+    "baseTimeout": 10000,
+    "uploadSpeedKBps": 256,
+    "downloadSpeedKBps": 256,
+    "maxTimeout": 1800000
+  },
+  "token": "__NAPCAT_TOKEN__"
+}

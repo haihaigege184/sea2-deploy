@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>SEA2 · 设备控制台</title>
+<style>
+  :root{
+    --bg:#0b0f1a; --bg2:#121829; --card:#161d31; --card2:#1b2440;
+    --line:#273150; --txt:#e8edf7; --mut:#8b97b5; --acc:#5b8cff; --acc2:#36d2a0;
+    --warn:#ffb454; --err:#ff6b6b; --ok:#36d2a0;
+    --grad:linear-gradient(135deg,#5b8cff 0%,#7b6bff 50%,#36d2a0 100%);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+    background:radial-gradient(1200px 600px at 80% -10%, rgba(91,140,255,.10), transparent 60%), var(--bg);
+    color:var(--txt);min-height:100vh;padding:24px 14px 60px;}
+  .wrap{max-width:760px;margin:0 auto;}
+  .hd{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+  .logo{width:42px;height:42px;border-radius:12px;background:var(--grad);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;color:#fff;box-shadow:0 6px 20px rgba(91,140,255,.35)}
+  .hd h1{font-size:19px;margin:0;font-weight:700;letter-spacing:.5px}
+  .hd .sub{font-size:12px;color:var(--mut);margin-top:2px}
+  .badge{margin-left:auto;font-size:12px;padding:6px 12px;border-radius:20px;border:1px solid var(--line);background:var(--card);color:var(--mut);display:flex;align-items:center;gap:6px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--mut)}
+  .dot.ok{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .dot.off{background:var(--warn)}
+  .card{background:linear-gradient(180deg,var(--card),var(--bg2));border:1px solid var(--line);border-radius:18px;padding:20px;margin-bottom:18px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+  .card h2{font-size:15px;margin:0 0 4px;font-weight:700;display:flex;align-items:center;gap:8px}
+  .card .desc{font-size:12.5px;color:var(--mut);margin:0 0 16px;line-height:1.6}
+  .sec-head{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+  .qrbox{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+  .qr{flex:0 0 auto;width:200px;height:200px;border-radius:14px;background:#fff;padding:8px;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+  .qr img{width:100%;height:100%;object-fit:contain}
+  .qr .scan{position:absolute;left:0;right:0;top:8px;height:3px;background:linear-gradient(90deg,transparent,var(--acc),transparent);animation:scan 2.4s ease-in-out infinite}
+  @keyframes scan{0%{top:10px}50%{top:184px}100%{top:10px}}
+  .qr.ok{border:2px solid var(--ok);box-shadow:0 0 24px rgba(54,210,160,.4)}
+  .qrwrap{transition:.3s}
+  .qrwrap.hide{display:none}
+  .meta{flex:1;min-width:220px}
+  .state{display:inline-flex;align-items:center;gap:8px;font-size:13px;padding:8px 14px;border-radius:12px;background:var(--card2);border:1px solid var(--line);margin-bottom:10px}
+  .state.ok{color:var(--ok);border-color:rgba(54,210,160,.4)}
+  .state.wait{color:var(--warn)}
+  .hint{font-size:12px;color:var(--mut);line-height:1.7}
+  .success{display:none;text-align:center;padding:14px 0}
+  .success.show{display:block;animation:pop .4s ease}
+  .check{width:64px;height:64px;border-radius:50%;background:rgba(54,210,160,.15);border:2px solid var(--ok);margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:30px;color:var(--ok)}
+  @keyframes pop{0%{transform:scale(.8);opacity:0}100%{transform:scale(1);opacity:1}}
+  .btn{appearance:none;border:none;cursor:pointer;font-size:13.5px;font-weight:600;padding:11px 18px;border-radius:12px;background:var(--grad);color:#fff;box-shadow:0 6px 18px rgba(91,140,255,.3);transition:.15s}
+  .btn:active{transform:translateY(1px)}
+  .btn.ghost{background:var(--card2);color:var(--txt);border:1px solid var(--line);box-shadow:none}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn.sm{font-size:12.5px;padding:9px 15px;border-radius:11px}
+  .note{font-size:12px;margin-top:10px;padding:8px 11px;border-radius:9px;line-height:1.6;display:none}
+  .note.info{display:block;background:rgba(91,140,255,.12);color:var(--acc)}
+  .note.ok{display:block;background:rgba(54,210,160,.12);color:var(--ok)}
+  .note.err{display:block;background:rgba(255,107,107,.12);color:var(--err)}
+  .dual-login{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .login-card{border:1px solid var(--line);border-radius:16px;background:var(--bg2);padding:16px;display:flex;flex-direction:column;gap:12px;transition:.2s}
+  .login-card:hover{border-color:rgba(91,140,255,.5)}
+  .lc-head{display:flex;align-items:center;gap:8px}
+  .lc-role{font-size:12px;font-weight:700;padding:3px 10px;border-radius:8px}
+  .lc-role.main{background:rgba(91,140,255,.15);color:var(--acc)}
+  .lc-role.backup{background:rgba(54,210,160,.15);color:var(--acc2)}
+  .lc-sub{font-size:11.5px;color:var(--mut)}
+  .lc-body{display:flex;flex-direction:column;align-items:center;gap:10px;min-height:170px;justify-content:center}
+  .lc-body .qr{width:150px;height:150px}
+  .lc-body .acc-pill{display:flex;align-items:center;gap:14px;padding:14px 16px;border:1px solid var(--line);border-radius:16px;background:var(--card);width:100%}
+  .lc-body .acc-pill img.acc-avatar{width:64px;height:64px;border-radius:50%;border:2px solid rgba(91,140,255,.45);box-shadow:0 0 0 4px rgba(91,140,255,.10),0 6px 18px rgba(0,0,0,.25);object-fit:cover;flex:0 0 auto}
+  .lc-body .acc-nick{font-weight:700;font-size:15px}
+  .lc-body .acc-qq{font-size:12px;color:var(--mut);margin-top:3px}
+  .lc-body .acc-status{margin-left:auto;font-size:11px;font-weight:700;padding:4px 10px;border-radius:10px;display:inline-flex;align-items:center;gap:5px}
+  .lc-body .acc-status.on{background:rgba(54,210,160,.15);color:var(--ok)}
+  .lc-body .acc-status.wait{background:rgba(255,180,84,.15);color:var(--warn)}
+  .lc-body .acc-pill .duty{margin-left:auto}
+  .duty{font-size:11px;font-weight:800;padding:4px 12px;border-radius:999px;display:inline-flex;align-items:center;gap:5px;background:linear-gradient(135deg,rgba(91,140,255,.22),rgba(54,210,160,.18));color:#fff;border:1px solid rgba(91,140,255,.55);box-shadow:0 0 12px rgba(91,140,255,.35);letter-spacing:.5px}
+  .duty .pulse{width:7px;height:7px;border-radius:50%;background:#6effb0;box-shadow:0 0 8px #6effb0;animation:pulse 1.6s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .lc-foot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-top:10px;border-top:1px solid var(--line)}
+  @media(max-width:560px){.dual-login{grid-template-columns:1fr}}
+  .prn-list{display:flex;flex-direction:column;gap:12px}
+  .prn{border:1px solid var(--line);border-radius:14px;padding:14px;background:var(--bg2)}
+  .prn .top{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+  .prn .nm{font-weight:700;font-size:14px}
+  .tag{font-size:11px;padding:3px 9px;border-radius:8px;background:var(--card2);color:var(--mut);border:1px solid var(--line)}
+  .tag.on{color:var(--ok);border-color:rgba(54,210,160,.4)}
+  .tag.new{color:var(--acc);border-color:rgba(91,140,255,.4)}
+  .tag.warn{color:var(--warn);border-color:rgba(255,180,84,.4)}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:8px}
+  label.fld{font-size:12px;color:var(--mut);display:flex;flex-direction:column;gap:5px;flex:1;min-width:160px}
+  select,input[type=text]{background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:9px 11px;font-size:13px;outline:none;width:100%}
+  select:focus,input:focus{border-color:var(--acc)}
+  .chk{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--mut);cursor:pointer;user-select:none}
+  .prn .msg{font-size:12px;margin-top:8px;padding:7px 10px;border-radius:8px;display:none}
+  .prn .msg.ok{display:block;background:rgba(54,210,160,.12);color:var(--ok)}
+  .prn .msg.err{display:block;background:rgba(255,107,107,.12);color:var(--err)}
+  .empty{font-size:12.5px;color:var(--mut);text-align:center;padding:18px;border:1px dashed var(--line);border-radius:12px}
+  .fixed{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+  .fixed img{width:130px;height:130px;background:#fff;border-radius:12px;padding:6px}
+  .fixed .info{font-size:12.5px;color:var(--mut);line-height:1.8}
+  .fixed code{color:var(--acc);background:var(--card2);padding:2px 7px;border-radius:6px;font-size:12px;word-break:break-all}
+  .ic{width:22px;height:22px;opacity:.9}
+  .webui .btns{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .acc-row{display:flex;align-items:center;gap:14px;padding:6px 0}
+  .acc-avatar{width:64px;height:64px;border-radius:50%;background:var(--card2);border:2px solid rgba(91,140,255,.4);box-shadow:0 0 0 3px rgba(91,140,255,.08),0 4px 14px rgba(0,0,0,.2);object-fit:cover;flex:0 0 auto}
+  .acc-info{min-width:0}
+  .acc-nick{font-size:15px;font-weight:700;color:var(--txt);word-break:break-all}
+  .acc-qq{font-size:12.5px;color:var(--mut);margin-top:4px}
+  .chan{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px dashed var(--line)}
+  .chan:last-child{border-bottom:none}
+  .chan .role{font-size:11px;padding:3px 9px;border-radius:8px;background:var(--card2);color:var(--mut);border:1px solid var(--line);flex:0 0 auto}
+  .chan .role.main{color:var(--acc);border-color:rgba(91,140,255,.4)}
+  .chan .role.backup{color:var(--acc2);border-color:rgba(54,210,160,.4)}
+  .help{margin-top:12px;font-size:12px;color:var(--mut);border:1px dashed var(--line);border-radius:10px;padding:8px 12px;line-height:1.7}
+  .help summary{cursor:pointer;color:var(--acc);outline:none}
+  .help pre{margin:8px 0 2px;padding:10px;background:var(--bg);border-radius:8px;font-size:11.5px;line-height:1.6;overflow-x:auto;color:var(--txt)}
+  .switch-line{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hd">
+    <div class="logo">S2</div>
+    <div>
+      <h1>SEA2 设备控制台</h1>
+      <div class="sub">原生 X86 客户端 · 登录（主/副双通道）与打印机配置</div>
+    </div>
+    <div class="badge"><span class="dot off" id="connDot"></span><span id="connTxt">连接中…</span></div>
+  </div>
+
+  <!-- 登录（主/副双通道合并单区域） -->
+  <div class="card">
+    <div class="sec-head"><h2>📱 QQ 扫码登录</h2></div>
+    <p class="desc">用手机 QQ 扫下方二维码完成原生客户端登录。二维码每 4 秒自动刷新，登录成功后将自动切换为已连接状态。主号为二进制 NapCat，副号为 docker NapCat（双系统开启后由 watchdog 自动仲裁）。</p>
+    <div class="dual-login">
+      <div class="login-card" id="mainLoginCard">
+        <div class="lc-head"><span class="lc-role main">主号</span><span class="lc-sub">二进制 NapCat</span></div>
+        <div class="lc-body" id="mainLoginBody"></div>
+        <div class="lc-foot">
+          <button class="btn ghost sm" id="switchBtn" onclick="switchAccount()">更换账号</button>
+          <span class="hint" id="mainLoginHint">退出当前账号，重新扫码登录</span>
+          <div class="note" id="switchMsg"></div>
+        </div>
+      </div>
+      <div class="login-card" id="backupLoginCard">
+        <div class="lc-head"><span class="lc-role backup">副号</span><span class="lc-sub">docker NapCat</span></div>
+        <div class="lc-body" id="backupLoginBody"></div>
+        <div class="lc-foot">
+          <button class="btn ghost sm" id="backupSwitchBtn" onclick="switchBackupAccount()">退出登录</button>
+          <span class="hint" id="backupLoginHint">退出 docker 铁柱号，重新扫码登录</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 主/副通道状态 + 已登录账号（合并单区域） -->
+    <div id="chanArea" style="margin-top:14px"></div>
+
+    <!-- 双系统开关 -->
+    <div class="switch-line">
+      <span class="tag" id="dualTag">双系统：—</span>
+      <button class="btn ghost sm" id="dualBtn" onclick="toggleDual()" disabled>查询中…</button>
+      <span class="hint" id="dualHint" style="flex:1;min-width:160px"></span>
+    </div>
+    <div class="note" id="dualMsg"></div>
+  </div>
+
+
+  <!-- 打印机 -->
+  <div class="card">
+    <div class="sec-head"><h2>🖨️ 打印机配置</h2></div>
+    <p class="desc">免去 631 端口繁琐配置。点击下方按钮自动识别局域网/USB 打印机，系统会匹配度最高的驱动供你确认，确认默认配置后即可一键添加。</p>
+    <button class="btn" id="scanBtn" onclick="scanPrinters()">识别打印机</button>
+    <div id="prnArea" style="margin-top:14px"></div>
+  </div>
+
+  <!-- 固定码 -->
+  <div class="card">
+    <div class="sec-head"><h2>🔳 固定登录码</h2></div>
+    <p class="desc">此码绑定设备当前局域网地址，设备接入新局域网后会<strong style="color:var(--acc)">自动获取新 IP 并重绑</strong>，无需重印。手机扫它即打开本页。</p>
+    <div class="fixed">
+      <img id="fixedImg" src="/fixed.png?t=1" alt="fixed qr" />
+      <div class="info">
+        当前固定码地址：<br/><code id="fixedUrl">—</code><br/><br/>
+        设备局域网 IP：<code id="lanIp">—</code><br/>
+        外网穿透：<code id="extUrl">—</code>
+      </div>
+    </div>
+  </div>
+
+  <!-- 原生管理台 -->
+  <div class="card webui">
+    <div class="sec-head"><h2>⚙️ 原生管理台</h2></div>
+    <p class="desc">打开 NapCat 原生管理台（自动登录缓存 / 账密登录 / 完整配置）。扫码登录负责首次连接，更多账号与配置项请进入原生界面。经中间页代理打开，后端自动注入登录凭据，免手动登录。</p>
+    <div class="btns">
+      <button class="btn" id="webuiBtn" onclick="openWebui()">打开管理台</button>
+      <button class="btn ghost" id="webuiCopyBtn" onclick="copyWebuiUrl()">复制地址</button>
+      <button class="btn ghost" id="fwSea1Btn" onclick="switchFramework('to_sea1')">切换备用(sea1)</button>
+      <button class="btn ghost" id="fwSea2Btn" onclick="switchFramework('to_sea2')">切换主用(sea2)</button>
+      <span class="hint">sea2 二进制 NapCat 为主通道，sea1 为备用框架；切换由 watchdog 执行（docker napcat 常驻，sea2 副通道依赖）</span>
+    </div>
+    <details class="help">
+      <summary>frp 隧道配置示例（type=tcp 透传 13011，HTTP+WS 全透传，最稳）</summary>
+      <pre>[sea2-13011]
+type = tcp
+local_ip = 127.0.0.1
+local_port = 13011
+remote_port = 13011</pre>
+      <div>仅需暴露 13011 单端口：静态页、/api/*、WebUI 代理（/webui/、/napcat-webui/）与 WS 升级全部经此端口。</div>
+    </details>
+    <div class="note" id="webuiMsg"></div>
+  </div>
+
+  <!-- Web 打印入口 -->
+  <div class="card">
+    <div class="sec-head"><h2>🖨️ Web 打印</h2></div>
+    <p class="desc">打开 Web 打印页：上传图片 / PDF，设置份数、双面、纸张后直接打印（复用本机 CUPS）。</p>
+    <button class="btn ghost" onclick="window.open('/webprint','_blank')">打开 Web 打印</button>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let connected = false;
+let switching = false;   // 更换账号进行中，期间暂停状态覆盖，防止误判
+let currentRole = 'SEA2_ACTIVE';   // [2026-08-08] 当前活跃框架角色（主/副上岗判定 + WebUI 跳转）
+
+// [O-2] 管理端点口令（x-web-token）辅助：登录后（NapCat WebUI 登录态存 localStorage 'token'）
+// 经 /api/web-token 换取管理口令存入 localStorage 'web_admin_token'，调用管理端点自动附带。
+async function getAdminToken(){
+  let t = '';
+  try{ t = localStorage.getItem('web_admin_token') || ''; }catch(e){}
+  if(t) return t;
+  // 从 NapCat WebUI 自动登录态取 Credential（key='token'，值与 injectAutoLogin 一致）
+  // injectAutoLogin 是异步的（doLogin 返回 Promise），页面加载初期 Credential 可能尚未写入 localStorage
+  // 此处轮询等待最多 5 秒，避免竞态导致 401
+  let cred = '';
+  for(let _w = 0; _w < 25 && !cred; _w++){
+    try{
+      const raw = localStorage.getItem('token');
+      if(raw){
+        let j = null; try{ j = JSON.parse(raw); }catch(e){ j = null; }
+        cred = (typeof j === 'string') ? j : ((j && (j.Credential || j.credential)) || raw);
+      }
+    }catch(e){}
+    if(!cred) await new Promise(r => setTimeout(r, 200));
+  }
+  if(!cred) return '';
+  try{
+    const r = await fetch('/api/web-token', { headers:{ 'Authorization':'Bearer ' + cred } });
+    const j = await r.json();
+    if(j && j.ok && j.token){
+      try{ localStorage.setItem('web_admin_token', j.token); }catch(e){}
+      return j.token;
+    }
+  }catch(e){}
+  return '';
+}
+async function adminFetch(url, opts){
+  opts = opts || {};
+  const h = Object.assign({}, opts.headers || {});
+  const t = await getAdminToken();
+  if(t) h['x-web-token'] = t;
+  if(opts.body !== undefined && !h['Content-Type']) h['Content-Type'] = 'application/json';
+  let r = await fetch(url, Object.assign({}, opts, { headers: h }));
+  // token 失效/未配置：清缓存重取一次（防陈旧 localStorage）
+  if(r.status === 401 || r.status === 503){
+    try{ localStorage.removeItem('web_admin_token'); }catch(e){}
+    const t2 = await getAdminToken();
+    if(t2){
+      const h2 = Object.assign({}, opts.headers || {}, { 'x-web-token': t2 });
+      if(opts.body !== undefined && !h2['Content-Type']) h2['Content-Type'] = 'application/json';
+      r = await fetch(url, Object.assign({}, opts, { headers: h2 }));
+    }
+  }
+  return r;
+}
+
+// 登录二维码轮询
+function refreshQr(){
+  if(connected) return;
+  const q = document.getElementById('qrImg'); if(q) q.src = '/qr.png?t=' + Date.now();
+  const bq = document.getElementById('backupQrImg'); if(bq) bq.src = '/backup-qr.png?t=' + Date.now();
+}
+function showWaitingLogin(){
+  // [FIX 2026-08-27] v2.1 双登录卡片 UI 已无 #qrWrap/#successBox/#loginState（旧单二维码 UI 残留），
+  // 守卫空元素避免“null.classList”崩溃；二维码由 renderLoginCards 每轮 poll 自动重绘。
+  const qrWrap = $('#qrWrap'); if (qrWrap) qrWrap.classList.remove('hide');
+  const successBox = $('#successBox'); if (successBox) successBox.classList.remove('show');
+  const loginState = $('#loginState');
+  if (loginState) { loginState.className = 'state wait'; loginState.innerHTML = '<span class="dot off"></span>等待扫码登录…'; }
+}
+// [QR-UI] 登录卡片渲染：已登录显示账号在线，未登录显示二维码
+function loginCardHtml(li, label, sub, qrSrc, qrId, duty){
+  if(li && li.loggedIn && li.user_id){
+    const uid = esc(String(li.user_id));
+    const nick = esc(li.nickname || ('QQ ' + uid));
+    const dutyHtml = duty ? '<span class="duty"><span class="pulse"></span>正在上岗</span>' : '<span class="acc-status on"><span class="dot ok"></span>在线</span>';
+    return '<div class="acc-pill">' +
+      '<img class="acc-avatar" src="/api/avatar?qq=' + encodeURIComponent(uid) + '" alt="avatar" onerror="letterAvatar(this,\'' + uid + '\')" />' +
+      '<div><div class="acc-nick">' + nick + '</div><div class="acc-qq">QQ：' + uid + ' · ' + esc(sub) + '</div></div>' +
+      dutyHtml +
+      '</div>';
+  }
+  return '<div class="qrwrap" id="' + qrId + 'Wrap">' +
+    '<div class="qr" id="' + qrId + 'Frame"><div class="scan"></div>' +
+    '<img id="' + qrId + '" src="' + qrSrc + '?t=1" alt="' + label + ' 扫码" /></div></div>' +
+    '<span class="acc-status wait"><span class="dot off"></span>待扫码</span>' +
+    (duty ? '<span class="duty"><span class="pulse"></span>正在上岗</span>' : '');
+}
+function renderLoginCards(d){
+  const main = d.login_info || { loggedIn:false };
+  const backup = d.backup_login_info || { loggedIn:false };
+  // [2026-08-08] 当前活跃框架 = "正在上岗"（role 来自 qr-server 读 framework.role）
+  const role = d.role || 'SEA2_ACTIVE';
+  const mainDuty = role !== 'SEA1_ACTIVE';
+  const backupDuty = role === 'SEA1_ACTIVE';
+  const mb = document.getElementById('mainLoginBody');
+  const bb = document.getElementById('backupLoginBody');
+  if(mb) mb.innerHTML = loginCardHtml(main, '主号', '二进制 NapCat', '/qr.png', 'qrImg', mainDuty);
+  if(bb) bb.innerHTML = loginCardHtml(backup, '副号', 'docker NapCat', '/backup-qr.png', 'backupQrImg', backupDuty);
+  // [2026-08-08] 退出登录按钮常显：已登录=退出登录，未登录=更换账号（不再隐藏，避免"假按钮"感知）
+  const switchBtn = document.getElementById('switchBtn');
+  if(switchBtn){
+    switchBtn.style.display = '';
+    switchBtn.textContent = main.loggedIn ? '退出登录' : '更换账号';
+    switchBtn.dataset.confirm = '';
+  }
+  const backupBtn = document.getElementById('backupSwitchBtn');
+  if(backupBtn){
+    backupBtn.style.display = '';
+    backupBtn.textContent = backup.loggedIn ? '退出登录' : '更换账号';
+    backupBtn.dataset.confirm = '';
+  }
+}
+// 主/副通道状态 + 已登录账号渲染（单区域）
+function renderChannels(d){
+  const main = d.login_info || { loggedIn:false };
+  const backup = d.backup_login_info || { loggedIn:false };
+  const role = d.role || 'SEA2_ACTIVE';
+  const mainRow = channelRow('主号', 'main', main, '二进制 NapCat', role !== 'SEA1_ACTIVE');
+  const backupRow = channelRow('副号', 'backup', backup, 'docker NapCat', role === 'SEA1_ACTIVE');
+  $('#chanArea').innerHTML =
+    '<div style="font-size:12px;color:var(--mut);margin:6px 0 4px">— 主/副通道账号 —</div>' +
+    mainRow + backupRow;
+}
+function channelRow(label, cls, li, sub, duty){
+  let inner;
+  if(li && li.loggedIn && li.user_id){
+    const uid = esc(String(li.user_id));
+    const nick = esc(li.nickname || ('QQ ' + uid));
+    const dutyHtml = duty ? '<span class="duty" style="margin-left:auto"><span class="pulse"></span>正在上岗</span>' : '<span class="tag on" style="margin-left:auto">在线</span>';
+    inner = '<img class="acc-avatar" src="/api/avatar?qq=' + encodeURIComponent(uid) + '" alt="avatar" onerror="letterAvatar(this,\'' + uid + '\')" />' +
+      '<div class="acc-info"><div class="acc-nick">' + nick + '</div><div class="acc-qq">QQ：' + uid + ' · ' + esc(sub) + '</div></div>' +
+      dutyHtml;
+  } else {
+    inner = '<div class="acc-info"><div class="acc-nick" style="color:var(--mut)">' + esc(label) + ' 未登录</div><div class="acc-qq">' + esc(sub) + '</div></div>' +
+      (duty ? '<span class="duty" style="margin-left:auto"><span class="pulse"></span>正在上岗</span>' : '<span class="tag" style="margin-left:auto">待命</span>');
+  }
+  return '<div class="chan"><span class="role ' + cls + '">' + esc(label) + '</span>' + inner + '</div>';
+}
+async function poll(){
+  try{
+    const r = await fetch('/api/status');
+    const d = await r.json();
+    $('#lanIp').textContent = d.lan_ip || '—';
+    $('#extUrl').textContent = d.external || '未配置';
+    $('#fixedUrl').textContent = d.fixed_url || '—';
+    currentRole = d.role || currentRole;   // [2026-08-08] 缓存活跃框架角色
+    updateWebuiBtn();                      // [2026-08-08] 管理台按钮跟随活跃框架
+    renderLoginCards(d);          // [QR-UI] 登录卡片：已登录显示在线，未登录显示二维码
+    renderChannels(d);            // 主/副账号卡片
+    if(switching) return;         // 切换账号期间不刷新连接态，避免闪烁
+    connected = d.connected;
+    $('#connDot').className = 'dot ' + (connected?'ok':'off');
+    $('#connTxt').textContent = connected ? '已连接' : '未连接';
+    if(connected){
+      // [FIX 2026-08-27] 守卫可能不存在的旧 UI 节点（#qrWrap/#loginState/#successBox），避免 null.classList 崩溃
+      const qrWrap = $('#qrWrap'); if (qrWrap) qrWrap.classList.add('hide');
+      const loginState = $('#loginState');
+      if (loginState) { loginState.className = 'state ok'; loginState.innerHTML = '<span class="dot ok"></span>已连接'; }
+      const successBox = $('#successBox'); if (successBox) successBox.classList.add('show');
+    } else {
+      showWaitingLogin();
+    }
+  }catch(e){}
+}
+setInterval(poll, 3000);
+setInterval(refreshQr, 4000);
+setInterval(()=>{ $('#fixedImg').src = '/fixed.png?t='+Date.now(); }, 15000);
+setInterval(()=>{ $('#backupQrImg').src = '/backup-qr.png?t='+Date.now(); }, 4000);
+poll();
+
+// 页面内二次确认（替代 confirm()：iframe 内会被浏览器安全策略拦截 → 按钮"无反应"）
+// 第一次点击进入"确认？"状态，3 秒内再点才执行；超时自动复位
+function armConfirm(btn){
+  if(btn.dataset.confirm === 'yes') return true;   // 已确认，本次点击执行
+  btn.dataset.confirm = 'yes';
+  const old = btn.textContent;
+  btn.textContent = '确认' + old + '？';
+  setTimeout(()=>{
+    if(btn.dataset.confirm === 'yes'){
+      btn.dataset.confirm = '';
+      btn.textContent = old;
+    }
+  }, 3000);
+  return false;                                     // 首次点击，仅进入确认态
+}
+// 更换账号：退出当前 QQ 登录 → 后端清会话并重启 napcat → 新二维码由 refreshQr 自动拉取
+async function switchAccount(){
+  if(switching) return;
+  const btn = $('#switchBtn');
+  if(!armConfirm(btn)) return;                      // 首次点击进入确认态
+  btn.dataset.confirm = '';
+  const note = $('#switchMsg');
+  const label = btn.textContent.replace(/^确认|？$/g, '');
+  switching = true;
+  btn.disabled = true;
+  btn.textContent = '正在退出…';
+  note.className = 'note info';
+  note.textContent = '正在退出当前账号并重启客户端，请稍候…';
+  try{
+    const r = await adminFetch('/api/account/switch', {method:'POST', body:'{}'});
+    let j = null;
+    try{ j = await r.json(); }catch(e){ j = null; }
+    if(!j) throw new Error('服务返回异常(HTTP ' + r.status + ')');
+    if(!j.ok) throw new Error(j.error || '切换失败');
+    connected = false;
+    $('#connDot').className = 'dot off';
+    $('#connTxt').textContent = '未连接';
+    showWaitingLogin();
+    note.className = 'note ok';
+    note.textContent = '✓ ' + (j.msg || '已退出，请扫描新二维码');
+    refreshQr();
+  }catch(e){
+    const emsg = (e && e.message) ? e.message : String(e);
+    note.className = 'note err';
+    note.textContent = '✗ 更换账号失败：' + emsg;
+  }finally{
+    switching = false;
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+// 副号退出重登（docker 铁柱号）：后端删容器会话 + 重启容器 → backupQrImg 自动刷新新二维码
+async function switchBackupAccount(){
+  if(switching) return;
+  const btn = $('#backupSwitchBtn');
+  if(!armConfirm(btn)) return;
+  btn.dataset.confirm = '';
+  const note = $('#backupLoginHint');
+  const label = btn.textContent.replace(/^确认|？$/g, '');
+  switching = true;
+  btn.disabled = true;
+  btn.textContent = '正在退出…';
+  note.className = 'note info';
+  note.textContent = '正在退出 docker 铁柱号并重启容器，请稍候…';
+  try{
+    const r = await adminFetch('/api/account/switch-backup', {method:'POST', body:'{}'});
+    let j = null;
+    try{ j = await r.json(); }catch(e){ j = null; }
+    if(!j) throw new Error('服务返回异常(HTTP ' + r.status + ')');
+    if(!j.ok) throw new Error(j.error || '切换失败');
+    note.className = 'note ok';
+    note.textContent = '✓ ' + (j.msg || '副号已退出，等待新二维码');
+    refreshQr();
+  }catch(e){
+    const emsg = (e && e.message) ? e.message : String(e);
+    note.className = 'note err';
+    note.textContent = '✗ 副号退出失败：' + emsg;
+  }finally{
+    switching = false;
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
+// 双系统开关：查询服务端校验（非永久授权 403 提示）
+let dualState = { canEnable:false, dualEnabled:false };
+async function refreshDual(){
+  try{
+    const r = await adminFetch('/api/dual/status', {cache:'no-store'});
+    const j = await r.json();
+    dualState = j || {};
+    const tag = $('#dualTag');
+    tag.className = 'tag ' + (j.dualEnabled ? 'on' : (j.canEnable ? 'warn' : ''));
+    tag.textContent = '双系统：' + (j.dualEnabled ? '已开启' : (j.canEnable ? '可开启' : '不可开启'));
+    const btn = $('#dualBtn');
+    btn.disabled = false;
+    btn.textContent = j.dualEnabled ? '关闭双系统' : '开启双系统';
+    $('#dualHint').textContent = (j.reason || '') + (j.licenseType ? '（授权类型：' + j.licenseType + '）' : '');
+  }catch(e){
+    $('#dualTag').className = 'tag';
+    $('#dualTag').textContent = '双系统：服务不可达';
+    $('#dualBtn').disabled = true;
+    $('#dualHint').textContent = '无法连接激活服务器，请检查 SEA2_SERVER_URL / SEA2_OPS_TOKEN / SEA2_DEVICE_ID 配置';
+  }
+}
+async function toggleDual(){
+  const btn = $('#dualBtn');
+  const note = $('#dualMsg');
+  const target = !dualState.dualEnabled;
+  btn.disabled = true;
+  note.className = 'note info';
+  note.textContent = target ? '正在开启双系统…' : '正在关闭双系统…';
+  try{
+    const r = await adminFetch(target ? '/api/dual/enable' : '/api/dual/disable', {method:'POST', body:'{}'});
+    const j = await r.json();
+    if(!j.ok){
+      note.className = 'note err';
+      note.textContent = '✗ ' + (j.error || '操作失败');
+      btn.disabled = false;
+      return;
+    }
+    note.className = 'note ok';
+    note.textContent = '✓ 双系统已' + (j.dualEnabled ? '开启' : '关闭');
+    refreshDual();
+  }catch(e){
+    note.className = 'note err';
+    note.textContent = '✗ 操作失败：' + (e && e.message ? e.message : String(e));
+    btn.disabled = false;
+  }
+}
+setInterval(refreshDual, 15000);
+refreshDual();
+
+// 主/副框架切换（下发 watchdog）
+async function switchFramework(action){
+  const note = $('#webuiMsg');
+  const label = action === 'to_sea1' ? '切主框架(sea1)' : '切主框架(sea2)';
+  if(!confirm('确定' + label + '？watchdog 将执行框架切换。')) return;
+  note.className = 'note info';
+  note.textContent = '正在下发框架切换指令…';
+  try{
+    const r = await adminFetch('/api/dual/switch', {method:'POST', body: JSON.stringify({action})});
+    const j = await r.json();
+    if(!j.ok){ note.className = 'note err'; note.textContent = '✗ ' + (j.error || '下发失败'); return; }
+    note.className = 'note ok';
+    note.textContent = '✓ 已下发 ' + action + '（watchdog 将在下个周期执行）';
+  }catch(e){
+    note.className = 'note err';
+    note.textContent = '✗ 下发失败：' + (e && e.message ? e.message : String(e));
+  }
+}
+
+// [2026-08-08 FIX] 统一入口：管理台地址恒为 /webui/（qr-server 按活跃框架角色自动代理到
+// 主号 6100 或副号 6099；React Router basename=/webui/ 天然匹配，副号不再白屏）。
+// 不再按角色区分 /backup-webui/，注入脚本 fetch('/api/auth/login') 也打在 /webui/ 裸路径自动转发正确端口。
+function getWebuiUrl(){
+  return location.origin + '/webui/';
+}
+function updateWebuiBtn(){
+  const btn = $('#webuiBtn');
+  if(btn) btn.textContent = '打开管理台';
+  const hint = $('.webui .desc');
+  if(hint) hint.textContent = '打开 NapCat 原生管理台（自动登录缓存 / 账密登录 / 完整配置）。扫码登录负责首次连接，更多账号与配置项请进入原生界面。经中间页代理打开，后端按当前上岗框架自动注入登录凭据，免手动登录。';
+}
+// 原生管理台：经中间页 /webui/ 反向代理打开（后端自动注入 Credential，免手动登录）
+function openWebui(){
+  const msg = $('#webuiMsg');
+  const url = getWebuiUrl();
+  const win = window.open(url, '_blank');
+  if(!win){
+    msg.className = 'note info';
+    msg.textContent = '弹窗被浏览器拦截，请点击「复制地址」手动打开。';
+    return;
+  }
+  msg.className = 'note ok';
+  msg.textContent = '✓ 已打开原生管理台（经中间页代理，已自动登录）';
+  let loaded = false;
+  try { win.onload = function(){ loaded = true; }; } catch(e){ /* 跨域限制下无法挂载 onload，退化为超时提示 */ }
+  setTimeout(function(){
+    if(loaded) return;
+    msg.className = 'note info';
+    msg.textContent = '若白屏：① frp 隧道需 type=tcp 透传 13011（HTTP+WS 全透传）；② 点「复制地址」重试；③ 内网访问正常 = 隧道配置问题，检查 frp 是否 TCP 模式';
+  }, 8000);
+}
+function copyWebuiUrl(){
+  const msg = $('#webuiMsg');
+  const url = getWebuiUrl();
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(url).then(()=>{
+      msg.className = 'note ok';
+      msg.textContent = '✓ 地址已复制：' + url;
+    }).catch(()=>{
+      fallbackCopyWebui(url, msg);
+    });
+  } else {
+    fallbackCopyWebui(url, msg);
+  }
+}
+function fallbackCopyWebui(text, msg){
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try{
+    document.execCommand('copy');
+    msg.className = 'note ok';
+    msg.textContent = '✓ 地址已复制：' + text;
+  }catch(e){
+    msg.className = 'note err';
+    msg.textContent = '✗ 复制失败，请手动复制：' + text;
+  }
+  document.body.removeChild(ta);
+}
+
+// 字母头像兜底
+function letterAvatar(img, text){
+  const t = String(text || '?');
+  const ch = t.charAt(0) || '?';
+  const qq = t.replace(/\D/g, '');
+  const palette = ['#5b8cff','#7b6bff','#36d2a0','#ffb454','#ff6b6b','#2dd4bf','#a78bfa','#f472b6'];
+  let idx = 0;
+  for(let i=0;i<qq.length;i++) idx = (idx + qq.charCodeAt(i)) % palette.length;
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" rx="24" fill="' + palette[idx] + '"/><text x="50" y="54" font-size="52" font-family="-apple-system,Segoe UI,sans-serif" font-weight="600" fill="#fff" text-anchor="middle" dominant-baseline="middle">' + esc(ch) + '</text></svg>';
+  if(img) img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+}
+
+// 打印机识别
+let prnData = null;
+async function scanPrinters(){
+  const btn = $('#scanBtn'); btn.disabled = true; btn.textContent = '识别中…';
+  try{
+    const r = await fetch('/api/printers');
+    prnData = await r.json();
+    renderPrinters();
+  }catch(e){
+    $('#prnArea').innerHTML = '<div class="empty">识别失败：'+e+'</div>';
+  }finally{
+    btn.disabled = false; btn.textContent = '重新识别';
+  }
+}
+function renderPrinters(){
+  const area = $('#prnArea');
+  if(!prnData){ area.innerHTML=''; return; }
+  let html = '';
+  if(prnData.configured && prnData.configured.length){
+    html += '<div class="prn-list">';
+    for(const c of prnData.configured){
+      html += `<div class="prn"><div class="top"><span class="nm">${esc(c.name)}</span>
+        <span class="tag on">已配置 · ${esc(c.status)}</span></div></div>`;
+    }
+    html += '</div>';
+  }
+  if(prnData.discovered && prnData.discovered.length){
+    html += '<div style="font-size:12px;color:var(--mut);margin:14px 0 8px">发现未配置设备：</div>';
+    html += '<div class="prn-list">';
+    prnData.discovered.forEach((d,i)=>{
+      const opts = (d.drivers||[]).map((x,j)=>`<option value="${esc(x.driver)}" ${j===0?'selected':''}>${esc(x.desc)}</option>`).join('');
+      html += `<div class="prn" data-i="${i}">
+        <div class="top"><span class="nm">${esc(d.info||d.uri)}</span><span class="tag new">新设备 · ${esc(d.backend)}</span></div>
+        <div class="row">
+          <label class="fld">驱动(已按匹配度排序)
+            <select class="drv">${opts || '<option>无匹配驱动</option>'}</select>
+          </label>
+          <label class="fld">位置/备注
+            <input type="text" class="loc" placeholder="如：前台" />
+          </label>
+        </div>
+        <div class="row">
+          <span class="chk"><input type="checkbox" class="def" checked/> 设为默认打印机</span>
+          <span class="chk"><input type="checkbox" class="a4" checked/> 默认 A4</span>
+          <button class="btn" onclick="addPrinter(${i})">添加并确认</button>
+        </div>
+        <div class="msg" id="msg${i}"></div>
+      </div>`;
+    });
+    html += '</div>';
+  }
+  if(!html) html = '<div class="empty">未识别到新设备。已配置的打印机见上方。可重新识别或确认 USB/网络打印机已连接。</div>';
+  area.innerHTML = html;
+}
+async function addPrinter(i){
+  const d = prnData.discovered[i];
+  const card = document.querySelector(`.prn[data-i="${i}"]`);
+  const driver = card.querySelector('.drv').value;
+  const loc = card.querySelector('.loc').value;
+  const def = card.querySelector('.def').checked;
+  const a4 = card.querySelector('.a4').checked;
+  const msg = card.querySelector('.msg');
+  msg.className='msg'; msg.textContent='';
+  const name = (d.info||d.uri).replace(/[^A-Za-z0-9]/g,'').slice(0,24) || ('Printer'+i);
+  try{
+    const r = await adminFetch('/api/printer/add',{method:'POST',
+      body: JSON.stringify({name, uri:d.uri, driver, location:loc, is_default:def, page_size:a4?'A4':'Letter'})});
+    const j = await r.json();
+    if(j.ok){ msg.className='msg ok'; msg.textContent='✓ 添加成功：'+j.verify; scanPrinters(); }
+    else { msg.className='msg err'; msg.textContent='✗ '+j.error; }
+  }catch(e){ msg.className='msg err'; msg.textContent='✗ '+e; }
+}
+function esc(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+</script>
+</body>
+</html>

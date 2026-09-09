@@ -1,0 +1,44 @@
+sequenceDiagram
+    %% ============ §9 增量 v1.3 · 场景一：试用设备上线 + 心跳 ============
+    actor CL as sea2 客户端（试用设备）
+    participant SVR as server.js /api/heartbeat
+    participant TR as trials.trialStatus
+    participant FS as FleetStore
+    participant FE as 前端 console.js（集群页）
+
+    CL->>CL: init() → 无 license，trialActive=true，status=TRIAL_ACTIVE
+    CL->>SVR: POST /api/heartbeat {machine_id, code:'', trial:true, trial_info:{active:true,...}, heartbeatProto:2}
+    SVR->>SVR: 有 code 走正式授权树（不变）；无 code + trial=true → 试用心跳分支
+    SVR->>TR: trialStatus(store, machine_id, cfg.trialDays)
+    TR-->>SVR: {active:true, expired:false, remaining_ms, end}
+    SVR->>FS: recordHeartbeat(mid, {valid:false, reason:'trial-active', licenseState:'unknown', isTrial:true, trialInfo})
+    FS-->>SVR: 快照已冻结（isTrial=true）
+    SVR-->>CL: {ok:true, valid:false, reason:'trial-active', commands:[...]}
+    CL->>CL: trialActive → 不降级（sea2/index.js 响应处理分支）
+    FE->>SVR: GET /api/admin/fleet/clients（列表带 isTrial 字段）
+    SVR-->>FE: items[{machineId, isTrial:true, licenseState:'unknown', reason:'trial-active'}]
+    FE->>FE: metaStatus('trialBadge','trial') → 「试用」徽标 + 聚合卡「试用 N 台」
+
+    %% ============ §9 增量 v1.3 · 场景二：换绑新设备 ============
+    actor OP as 运维员（L3）
+    participant FE2 as 前端 console.admin.js
+    participant API as ConsoleApi
+    participant BIND as opsBinding
+    participant ST as store（codes）
+    participant AUD as OpsAuditStore
+
+    OP->>FE2: 授权管理 → 「换绑新设备」向导
+    FE2->>API: GET /api/admin/ops/binding/lookup?code=SEA2-XXXX
+    API->>BIND: lookupBinding(store, code)
+    BIND->>ST: getCode(code)
+    ST-->>BIND: {bound_machine_id:'SEA2-OLD', status:'active', expires_at}
+    BIND-->>API: {ok:true, bound_machine_id:'SEA2-OLD', ...}
+    API-->>FE2: 展示旧设备绑定信息（警告：旧设备将立即失效）
+    OP->>FE2: 输入新设备机器码 SEA2-NEW（可选 oldMachineId=SEA2-OLD）
+    FE2->>API: POST /api/admin/ops/binding {code, machineId:'SEA2-NEW', oldMachineId:'SEA2-OLD'}
+    API->>BIND: correctBinding(store, code, 'SEA2-NEW', operator, level)
+    BIND->>ST: updateCode(code, {bound_machine_id:'SEA2-NEW', binding_corrected_at})
+    BIND->>AUD: logOp({action:'binding-correct', detail:'SEA2-OLD → SEA2-NEW（rebind-replacement）'})
+    BIND-->>API: {ok:true, before, after}
+    API-->>FE2: 换绑成功
+    FE2-->>OP: toast + 刷新授权列表

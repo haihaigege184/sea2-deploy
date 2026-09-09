@@ -1,0 +1,63 @@
+classDiagram
+    %% ============ §9 增量 v1.3 类图（增量类/方法，与既有类图互补）============
+
+    class FleetStore {
+        +recordHeartbeat(mid, info) ClientRecord
+        +snapshot.isTrial bool
+        +snapshot.trialInfo object|null
+    }
+
+    class FleetReason {
+        +REASON_MAP['trial-active'] dict
+        +REASON_MAP['trial-expired'] dict
+    }
+
+    class FleetService {
+        +buildMeta(cfg) Meta
+        +meta.deviceStatus dict[]
+        +meta.orderStatus dict[]
+        +meta.anomalyStatus dict[]
+        +meta.printerStatus dict[]
+        +meta.trialBadge dict[]
+        +listClients() items[].isTrial bool
+        +clientDetail() isTrial/trialInfo
+        +agg.trial int
+    }
+
+    class OpsBinding {
+        +correctBinding(store, code, machineId, operator, level) Result
+        +lookupBinding(store, code) Result
+    }
+
+    class ConsoleApi {
+        +GET /api/admin/ops/binding/lookup code Result
+        +POST /api/admin/ops/binding body.oldMachineId? Result
+    }
+
+    class Sea2LicenseGate {
+        +startHeartbeat(ms) void
+        +tick(): 去 license 门槛，试用期也发心跳
+        +payload.trial bool
+        +payload.trial_info object
+        +响应处理: trialActive 时不因 !res.valid 降级
+    }
+
+    class Sea2Heartbeat {
+        +buildHeartbeatPayload(params) Promise
+        +支持 code='' + trial/trial_info 字段
+    }
+
+    class ConsoleApp {
+        +metaStatus(metaKey, st) {label,badge}
+        +devStatusTag(st) 走字典
+        +statusTag(st) 走字典
+        +anomalyStatusBadge(st) 走字典
+        +换绑新设备向导(admin.js)
+        +集群「试用」徽标
+    }
+
+    FleetService --> FleetStore
+    FleetService --> FleetReason
+    ConsoleApi --> OpsBinding
+    Sea2LicenseGate --> Sea2Heartbeat
+    ConsoleApp --> FleetService
