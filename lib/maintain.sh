@@ -18,7 +18,7 @@ maint_status() {
 
 maint_restart() {
   log_step "重启服务栈"
-  pm2 restart sea1-activation sea2-bot sea2-print-server sea2-qr sea2-napcat sea2-watchdog >/dev/null 2>&1
+  pm2 restart sea1-activation sea2-bot sea2-print-server sea2-qr sea2-napcat sea2-napcat-backup sea2-watchdog >/dev/null 2>&1
   pm2 save >/dev/null 2>&1 || true
   log_ok "已重启（角色互斥：sea1-bot 由 watchdog 仲裁管理）"
   maint_status
