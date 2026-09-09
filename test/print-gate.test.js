@@ -2,7 +2,7 @@
 /* 打印门禁端到端验证：模拟激活服务端 + 直接驱动 PrintPlugin._checkPrintPerm */
 const http = require('http');
 const path = require('path');
-const PrintPlugin = require(path.join(__dirname, 'payload/sea2/plugins/print/index.js'));
+const PrintPlugin = require(path.join(__dirname, '..', 'payload/sea2/plugins/print/index.js'));
 
 function makeServer(handler) {
   return new Promise((resolve) => {

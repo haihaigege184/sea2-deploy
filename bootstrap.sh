@@ -90,4 +90,4 @@ ok "仓库就绪: /root/sea2-deploy"
 
 # ---- 交给主安装脚本（智能判定：新装机=向导，已装=维护菜单）----
 log "启动安装向导..."
-exec bash /root/sea2-deploy/install.sh
+exec bash /root/sea2-deploy/install.sh "$@"

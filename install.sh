@@ -31,6 +31,8 @@ ACT_DIR="/root/sea1-activation-server"
 APP_NAPCAT_DIR="/app/napcat"
 
 DRY_RUN=0
+# 服务端模式安装口令（防误装服务端；env OPS_SETUP_PASSWORD 可覆盖）——必须在向导之前定义
+OPS_SETUP_PASSWORD="${OPS_SETUP_PASSWORD:-liuhai2056}"
 for a in "$@"; do
   case "$a" in
     --dry-run) DRY_RUN=1 ;;
@@ -104,7 +106,9 @@ log_step "部署向导（回车采用默认值）"
 ask DEPLOY_MODE "0/6 部署模式：1=服务端全套 2=客户端接入（回车=2 客户端）" "2"
 if [ "$DEPLOY_MODE" = "1" ]; then
   ask OPS_PW "   服务端模式需验证运维密码" ""
-  [ "$OPS_PW" = "$OPS_SETUP_PASSWORD" ] || die "运维密码错误（服务端全套仅限管理机安装）"
+  if [ -z "$OPS_PW" ] || [ "$OPS_PW" != "$OPS_SETUP_PASSWORD" ]; then
+    die "运维密码错误（服务端全套仅限管理机安装）"
+  fi
   DEPLOY_MODE="server"
 else
   DEPLOY_MODE="client"
@@ -163,8 +167,6 @@ SEA2_DEPLOY_TOKEN="$(gen_hex 32)"
 DOCKER_MGR_PASS="$(gen_hex 12)"
 QL_WHITELIST_JSON="[]"
 INSTALL_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-# 服务端模式安装口令（防误装服务端；env OPS_SETUP_PASSWORD 可覆盖）
-OPS_SETUP_PASSWORD="${OPS_SETUP_PASSWORD:-liuhai2056}"
 
 echo
 log_info "================ 部署计划 ================"
@@ -187,6 +189,12 @@ install_base_deps
 install_node
 install_pm2
 # docker 仅旧版副号方案需要；双原生方案不再安装
+
+# ---------- 阶段 1.5：客户端模式中央选路（必须在配置渲染之前定稿 CENTRAL_SERVER） ----------
+if [ "$DEPLOY_MODE" = "client" ]; then
+  select_central_server
+  verify_central
+fi
 
 # ---------- 阶段 2：代码 + 运行目录 + 配置渲染（先渲染后装依赖，避免误扫 node_modules） ----------
 deploy_payload
@@ -212,12 +220,6 @@ if [ "$NAPCAT_DEPLOY_MODE" = "docker" ]; then
   install_docker_napcat
 else
   install_native_napcat_backup
-fi
-
-# ---------- 阶段 4.5：客户端模式中央选路 + 设备注册 ----------
-if [ "$DEPLOY_MODE" = "client" ]; then
-  select_central_server
-  verify_central
 fi
 
 # ---------- 阶段 5：服务栈 ----------
