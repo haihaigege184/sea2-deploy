@@ -4,3 +4,6 @@ _packtmp/
 *.tar.gz
 .deploy-logs/
 *.log
+_rendertest/
+_rendertest_work/
+_dbg_*
