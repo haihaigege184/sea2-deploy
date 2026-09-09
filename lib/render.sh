@@ -26,6 +26,8 @@ PLACEHOLDER_VARS=(
   "__BOT_NOTIFY_TOKEN__ BOT_NOTIFY_TOKEN"
   "__SEA2_DEPLOY_TOKEN__ SEA2_DEPLOY_TOKEN"
   "__DOCKER_MGR_PASS__ DOCKER_MGR_PASS"
+  "__SEA1_ADMIN_TOKEN__ SEA1_ADMIN_TOKEN"
+  "__CENTRAL_SERVER__ CENTRAL_SERVER"
   "__INSTALL_TIME__ INSTALL_TIME"
 )
 
@@ -89,15 +91,24 @@ deploy_configs() {
   install -m 644 "$tpl/webui.main.json"    "$APP_NAPCAT_DIR/config/webui.json"
   install -m 644 "$tpl/onebot11.main.json" "$APP_NAPCAT_DIR/config/onebot11_${MAIN_QQ}.json"
   if [ "$WITH_BACKUP" = "1" ]; then
-    install -m 644 "$tpl/napcat.json"        "$app2/config/napcat.json"
-    install -m 644 "$tpl/webui.backup.json"  "$app2/config/webui.json"
-    install -m 644 "$tpl/onebot11.backup.json" "$app2/config/onebot11_${BACKUP_QQ}.json"
+    if [ "${NAPCAT_DEPLOY_MODE:-native}" = "docker" ]; then
+      mkdir -p /root/napcat/config
+      install -m 644 "$tpl/napcat.json"          /root/napcat/config/napcat.json
+      install -m 644 "$tpl/webui.docker.json"    /root/napcat/config/webui.json
+      install -m 644 "$tpl/onebot11.docker.json" /root/napcat/config/onebot11_${BACKUP_QQ}.json
+    else
+      install -m 644 "$tpl/napcat.json"          "$app2/config/napcat.json"
+      install -m 644 "$tpl/webui.backup.json"    "$app2/config/webui.json"
+      install -m 644 "$tpl/onebot11.backup.json" "$app2/config/onebot11_${BACKUP_QQ}.json"
+    fi
   fi
 
   render_tree "$SEA2_DIR"
   render_tree "$SEA1_DIR"
   render_tree "$ACT_DIR"
   render_tree "$APP_NAPCAT_DIR/config"
-  [ "$WITH_BACKUP" = "1" ] && render_tree "$app2/config"
+  if [ "$WITH_BACKUP" = "1" ]; then
+    if [ "${NAPCAT_DEPLOY_MODE:-native}" = "docker" ]; then render_tree /root/napcat/config; else render_tree "$app2/config"; fi
+  fi
   chmod 600 "$ACT_DIR/config.env" "$SEA2_DIR/napcat/ops.env" "$SEA2_DIR/napcat/napcat-http.env" 2>/dev/null || true
 }

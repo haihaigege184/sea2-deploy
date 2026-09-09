@@ -812,6 +812,16 @@ function makeApp(cfg, keys, store) {
         });
       }
 
+      // ---- [R10] 公开：隧道地址池下发（客户端一键部署自动选路用）----
+      // 仅回公开可达地址清单，无任何敏感字段；完整配置仍走 /api/deploy/config（token 鉴权）。
+      if (req.method === 'GET' && url.pathname === '/api/deploy/tunnels') {
+        const c = deployConfig.load();
+        const list = (c.tunnels || [])
+          .filter((t) => t.enabled === true && t.publicAddr)
+          .map((t) => ({ publicAddr: String(t.publicAddr), name: String(t.name || '') }));
+        return send(res, 200, { ok: true, masterAddress: String(c.masterAddress || ''), tunnels: list, updatedAt: String(c.updatedAt || '') });
+      }
+
       // ---- [R6 R4] 容器管理（FastOSDocker）反代路由 ----
       // 置于 console 静态与 admin 闸门之前：/docker-mgr/* 前缀剥离转发、根 /ws 终端隧道、
       // 根 POST /login 兜底（app.js baseURL 重写失败时 SPA 登录仍可达）。鉴权在 dockerMgrProxy 内完成。

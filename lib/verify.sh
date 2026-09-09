@@ -39,7 +39,7 @@ run_verify() {
   log_step "健康检查"
   sleep 3
 
-  check_http "激活服务 sea1-activation" "http://127.0.0.1:3457/api/shop/info"
+  [ "${DEPLOY_MODE:-server}" = "server" ] && check_http "激活服务 sea1-activation" "http://127.0.0.1:3457/api/shop/info"
   check_http "主框架 sea2-bot HTTP"     "http://127.0.0.1:13001/"
   check_http "打印服务 print-server"    "http://127.0.0.1:13012/"
   check_http "扫码中间页 sea2-qr"       "http://127.0.0.1:13011/"

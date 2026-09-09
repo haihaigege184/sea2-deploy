@@ -18,7 +18,10 @@ maint_status() {
 
 maint_restart() {
   log_step "重启服务栈"
-  pm2 restart sea1-activation sea2-bot sea2-print-server sea2-qr sea2-napcat sea2-napcat-backup sea2-watchdog >/dev/null 2>&1
+  local svcs="sea2-bot sea2-print-server sea2-qr sea2-napcat sea2-watchdog"
+  [ -f "$SEA2_DIR/sea1-activation-server/server.js" ] && [ "$(cat "$SEA2_DIR/deploy-mode" 2>/dev/null || echo server)" = "server" ] && svcs="sea1-activation $svcs"
+  [ "$(cat "$SEA2_DIR/napcat/deploy-mode" 2>/dev/null || echo native)" = "native" ] && svcs="$svcs sea2-napcat-backup"
+  pm2 restart $svcs >/dev/null 2>&1
   pm2 save >/dev/null 2>&1 || true
   log_ok "已重启（角色互斥：sea1-bot 由 watchdog 仲裁管理）"
   maint_status
@@ -38,6 +41,8 @@ maint_logs() {
 
 maint_check() {
   NAPCAT_TOKEN="${NAPCAT_TOKEN:-$(jq -r .napcat_token "$SEA2_DIR/config.json" 2>/dev/null || echo '')}"
+  export DEPLOY_MODE="$(cat "$SEA2_DIR/deploy-mode" 2>/dev/null || echo server)"
+  export NAPCAT_DEPLOY_MODE="$(cat "$SEA2_DIR/napcat/deploy-mode" 2>/dev/null || echo native)"
   WITH_BACKUP=1 FAILS=0
   run_verify || true
 }

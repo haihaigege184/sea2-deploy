@@ -22,6 +22,7 @@ MONITOR_TOKEN=$(printf 'b%.0s' $(seq 64)); LICENSE_ADMIN_TOKEN=$(printf 'c%.0s' 
 BOT_NOTIFY_TOKEN=$(printf 'd%.0s' $(seq 64)); WEBHOOK_SECRET=$(printf 'e%.0s' $(seq 48))
 SEA2_DEPLOY_TOKEN=$(printf 'f%.0s' $(seq 64)); DOCKER_MGR_PASS=dm1234567890
 INSTALL_TIME=2026-09-09T00:00:00Z
+CENTRAL_SERVER=http://127.0.0.1:3457; SEA1_ADMIN_TOKEN=admintoken0123456789abcdef
 
 # ---- 组装部署树 ----
 TPL="$REPO/templates"

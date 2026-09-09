@@ -50,6 +50,7 @@ source "$LIB_DIR/deps.sh"
 source "$LIB_DIR/render.sh"
 # shellcheck source=lib/napcat.sh
 source "$LIB_DIR/napcat.sh"
+source "$LIB_DIR/central.sh"
 # shellcheck source=lib/services.sh
 source "$LIB_DIR/services.sh"
 # shellcheck source=lib/verify.sh
@@ -100,6 +101,15 @@ fi
 # ---------- 交互式向导 ----------
 log_step "部署向导（回车采用默认值）"
 
+ask DEPLOY_MODE "0/6 部署模式：1=服务端全套 2=客户端接入（回车=2 客户端）" "2"
+if [ "$DEPLOY_MODE" = "1" ]; then
+  ask OPS_PW "   服务端模式需验证运维密码" ""
+  [ "$OPS_PW" = "$OPS_SETUP_PASSWORD" ] || die "运维密码错误（服务端全套仅限管理机安装）"
+  DEPLOY_MODE="server"
+else
+  DEPLOY_MODE="client"
+fi
+
 ask MAIN_QQ      "1/6 主号 QQ（主系统 sea2-bot，原生 NapCat :4000 登录的号）" ""
 [[ "$MAIN_QQ" =~ ^[0-9]{5,12}$ ]] || die "主号 QQ 非法"
 
@@ -122,12 +132,19 @@ DEMO_MODE_JSON="{}"
 ask PRINTER_DEFAULT "5/6 默认打印机（CUPS 队列名，回车=HP_LaserJet_P2015_Series）" "HP_LaserJet_P2015_Series"
 PRINTERS_JSON="[\"$PRINTER_DEFAULT\"]"
 
+if [ "$DEPLOY_MODE" = "server" ]; then
 ask DEPLOY_ACTIVATION "6/6 是否部署激活授权服务 :3457（回车=是 y）" "y"
 if [ "$DEPLOY_ACTIVATION" = "n" ] || [ "$DEPLOY_ACTIVATION" = "N" ]; then
   DEPLOY_ACTIVATION="n"
   log_warn "跳过激活服务（bot 将无法核销授权，仅供测试）"
 else
   DEPLOY_ACTIVATION="y"
+fi
+else
+  # 客户端模式：中央服务端地址（内网直连或留空自动从隧道池测速选路）
+  ask CENTRAL_SERVER "6/6 中央服务端地址（内网如 http://10.0.0.11:3457；回车=自动测速隧道池）" "http://10.0.0.11:3457"
+  ask SEA1_ADMIN_TOKEN "    运维中心 ADMIN_TOKEN（可选，用于自动领取 client-code；回车=跳过）" ""
+  DEPLOY_ACTIVATION="n"
 fi
 
 # ---------- 自动生成密钥（与生产同构，互相独立） ----------
@@ -146,6 +163,8 @@ SEA2_DEPLOY_TOKEN="$(gen_hex 32)"
 DOCKER_MGR_PASS="$(gen_hex 12)"
 QL_WHITELIST_JSON="[]"
 INSTALL_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+# 服务端模式安装口令（防误装服务端；env OPS_SETUP_PASSWORD 可覆盖）
+OPS_SETUP_PASSWORD="${OPS_SETUP_PASSWORD:-liuhai2056}"
 
 echo
 log_info "================ 部署计划 ================"
@@ -153,6 +172,11 @@ log_info "架构: $ARCH | 系统: $DISTRO"
 log_info "主号: $MAIN_QQ（原生 NapCat :4000，WebUI :6100）"
 log_info "副号: $BACKUP_QQ（原生 NapCat 双实例 :3000，WebUI :6099）"
 log_info "管理员: $ADMIN_QQ | 通知群: ${NOTIFY_GROUPS:-（空）}"
+if [ "$DEPLOY_MODE" = "client" ]; then
+  log_info "部署模式: 客户端（中央服务端: 待测速选定）"
+else
+  log_info "部署模式: 服务端全套"
+fi
 log_info "部署路径: $SEA2_DIR / $SEA1_DIR / $ACT_DIR"
 log_info "=========================================="
 [ "$DRY_RUN" = "1" ] && { log_ok "演练模式结束（未做任何变更）"; exit 0; }
@@ -169,18 +193,32 @@ deploy_payload
 init_runtime_dirs
 
 log_step "渲染配置（占位符 → 本机实际值）"
+[ "$DEPLOY_MODE" = "server" ] && CENTRAL_SERVER="http://127.0.0.1:3457"
+export CENTRAL_SERVER SEA1_ADMIN_TOKEN
 deploy_configs
 verify_no_placeholder "$SEA2_DIR"
 verify_no_placeholder "$SEA1_DIR"
-verify_no_placeholder "$ACT_DIR"
+[ "$DEPLOY_MODE" = "server" ] && verify_no_placeholder "$ACT_DIR"
 log_ok "配置渲染完成（无残留占位符）"
 
 npm_install_all
 
-# ---------- 阶段 4：NapCat（双原生：主副共用 QQ 二进制） ----------
+# ---------- 阶段 4：NapCat（主号原生 + 副号按内存自适应） ----------
 cleanup_legacy_docker_napcat
+detect_napcat_mode
 install_native_napcat
-install_native_napcat_backup
+if [ "$NAPCAT_DEPLOY_MODE" = "docker" ]; then
+  install_docker
+  install_docker_napcat
+else
+  install_native_napcat_backup
+fi
+
+# ---------- 阶段 4.5：客户端模式中央选路 + 设备注册 ----------
+if [ "$DEPLOY_MODE" = "client" ]; then
+  select_central_server
+  verify_central
+fi
 
 # ---------- 阶段 5：服务栈 ----------
 pm2_start_stack
@@ -188,6 +226,11 @@ pm2_setup_boot
 
 # ---------- 阶段 5.5：打印机自动配置（探测 USB/网络设备并注册 CUPS 队列） ----------
 configure_printer_auto
+
+# ---------- 阶段 5.6：客户端设备注册 + 试用激活（连上运维中心才算部署成功） ----------
+if [ "$DEPLOY_MODE" = "client" ]; then
+  activate_device_trial
+fi
 
 # ---------- 阶段 6：健康检查 + 汇总 ----------
 run_verify || true
