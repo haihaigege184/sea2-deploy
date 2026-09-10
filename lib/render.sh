@@ -37,8 +37,11 @@ render_file() {
   for pair in "${PLACEHOLDER_VARS[@]}"; do
     ph="${pair%% *}"; var="${pair##* }"
     val="${!var:-}"
-    [ -n "$val" ] || continue
-    sed -i "s|${ph}|${val}|g" "$f"
+    # 空值也必须替换：账号类允许留空（稍后扫码登录），若跳过替换会让 __MAIN_QQ__ 等
+    # 占位符残留在配置里，随后 verify_no_placeholder 直接判失败 → 部署中断。
+    local esc
+    esc="$(printf '%s' "$val" | sed -e 's/[&|\\]/\\&/g')"
+    sed -i "s|${ph}|${esc}|g" "$f"
   done
 }
 

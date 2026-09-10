@@ -104,15 +104,11 @@ fi
 log_step "部署向导（回车采用默认值）"
 
 # 无可用交互终端且关键参数未预设 → 提前给出可照做的命令，避免逐项卡在"XX 非法"
+# 无可用交互终端时不再中止：账号类本就可留空（稍后控制台扫码登录 + 机器人交互激活），
+# 安装只需完成"硬件/环境 + 设备维度试用"即可，其余全部采用默认值。
 if ! _tty_ok; then
-  if [ -z "${MAIN_QQ:-}" ] || [ -z "${BACKUP_QQ:-}" ]; then
-    log_warn "未检测到可交互终端（/dev/tty 不可用），向导无法提问。"
-    die "请改用下列任一方式重跑：
-  A) 先落盘再执行（推荐，可正常交互）：
-     curl -fsSL http://sea1.xsian.top/downloads/bootstrap.sh -o /tmp/sea2.sh; bash /tmp/sea2.sh
-  B) 非交互一次性装完（把号换成你自己的）：
-     MAIN_QQ=主号 BACKUP_QQ=副号 ADMIN_QQ=管理员 bash /tmp/sea2.sh"
-  fi
+  log_warn "未检测到可交互终端（/dev/tty 不可用）→ 全部采用默认值继续安装。"
+  log_warn "账号将留空：装完后请到 WebUI 扫码登录，再通过机器人对话完成账号激活。"
 fi
 
 ask DEPLOY_MODE "0/6 部署模式：1=服务端全套 2=客户端接入（回车=2 客户端）" "2"
@@ -126,25 +122,22 @@ else
   DEPLOY_MODE="client"
 fi
 
-ask MAIN_QQ      "1/6 主号 QQ（主系统 sea2-bot，原生 NapCat :4000 登录的号）" ""
-[[ "$MAIN_QQ" =~ ^[0-9]{5,12}$ ]] || die "主号 QQ 非法（当前=\"${MAIN_QQ:-<空>}\"）。
-  向导读不到输入（无可用交互终端）。二选一：
-    A) 先落盘再执行（推荐，可正常交互）：
-       curl -fsSL http://sea1.xsian.top/downloads/bootstrap.sh -o /tmp/sea2.sh; bash /tmp/sea2.sh
-    B) 非交互一次性装完（把号换成你自己的）：
-       MAIN_QQ=主号 BACKUP_QQ=副号 ADMIN_QQ=管理员 bash /tmp/sea2.sh"
+# 账号类一律可选：安装只负责硬件/环境与设备维度试用，
+# 账号由用户稍后在 WebUI 扫码登录，并通过机器人交互完成激活。
+ask MAIN_QQ      "1/6 主号 QQ（回车=跳过，稍后去控制台扫码登录）" ""
+if [ -n "$MAIN_QQ" ]; then
+  [[ "$MAIN_QQ" =~ ^[0-9]{5,12}$ ]] || die "主号 QQ 格式非法（当前=$MAIN_QQ）。留空请直接回车——账号可稍后在控制台扫码登录。"
+fi
 
-ask BACKUP_QQ    "2/6 副号 QQ（副系统原生 NapCat 双实例 :3000 登录的号，必须与主号不同）" ""
-[[ "$BACKUP_QQ" =~ ^[0-9]{5,12}$ ]] || die "副号 QQ 非法（当前=\"${BACKUP_QQ:-<空>}\"）。
-  向导读不到输入（无可用交互终端）。二选一：
-    A) 先落盘再执行（推荐，可正常交互）：
-       curl -fsSL http://sea1.xsian.top/downloads/bootstrap.sh -o /tmp/sea2.sh; bash /tmp/sea2.sh
-    B) 非交互一次性装完（把号换成你自己的）：
-       MAIN_QQ=主号 BACKUP_QQ=副号 ADMIN_QQ=管理员 bash /tmp/sea2.sh"
-[ "$MAIN_QQ" != "$BACKUP_QQ" ] || die "主副号必须不同（共号会互踢）"
+ask BACKUP_QQ    "2/6 副号 QQ（回车=跳过；如填必须与主号不同）" ""
+if [ -n "$BACKUP_QQ" ]; then
+  [[ "$BACKUP_QQ" =~ ^[0-9]{5,12}$ ]] || die "副号 QQ 格式非法（当前=$BACKUP_QQ）。留空请直接回车。"
+fi
+# 仅当两个号都填了才校验互异（都留空是合法的：等扫码登录）
+[ -z "$MAIN_QQ" ] || [ -z "$BACKUP_QQ" ] || [ "$MAIN_QQ" != "$BACKUP_QQ" ] || die "主副号必须不同（共号会互踢）"
 WITH_BACKUP=1
 
-ask ADMIN_QQ     "3/6 管理员 QQ（superAdmin/developer，接收重启通知/超控）" "$MAIN_QQ"
+ask ADMIN_QQ     "3/6 管理员 QQ（回车=同主号；留空则稍后在机器人对话里自助激活绑定）" "$MAIN_QQ"
 
 ask NOTIFY_GROUPS "4/6 通知群号（逗号分隔，如 123456,234567；回车=空）" ""
 NOTIFY_GROUPS_JSON="[]"
@@ -204,9 +197,9 @@ INSTALL_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo
 log_info "================ 部署计划 ================"
 log_info "架构: $ARCH | 系统: $DISTRO"
-log_info "主号: $MAIN_QQ（原生 NapCat :4000，WebUI :6100）"
-log_info "副号: $BACKUP_QQ（原生 NapCat 双实例 :3000，WebUI :6099）"
-log_info "管理员: $ADMIN_QQ | 通知群: ${NOTIFY_GROUPS:-（空）}"
+log_info "主号: ${MAIN_QQ:-（未设置 · 稍后控制台扫码登录）}（原生 NapCat :4000，WebUI :6100）"
+log_info "副号: ${BACKUP_QQ:-（未设置 · 稍后控制台扫码登录）}（原生 NapCat 双实例 :3000，WebUI :6099）"
+log_info "管理员: ${ADMIN_QQ:-（未设置 · 稍后机器人对话自助激活）} | 通知群: ${NOTIFY_GROUPS:-（空）}"
 if [ "$DEPLOY_MODE" = "client" ]; then
   log_info "部署模式: 客户端（中央服务端: 待测速选定）"
 else
@@ -282,14 +275,17 @@ cat <<SUM
    激活服务   http://$(hostname -I 2>/dev/null | awk '{print $1}'):3457
    主框架HTTP :13001    副框架HTTP :13000
    打印服务   :13012    扫码中间页 :13011
-   主号NapCat :4000     WebUI http://<本机IP>:6100   （登录账号 $MAIN_QQ）
-   副号NapCat :3000     WebUI http://<本机IP>:6099   （登录账号 $BACKUP_QQ）
+   主号NapCat :4000     WebUI http://<本机IP>:6100   （登录账号 ${MAIN_QQ:-待扫码}）
+   副号NapCat :3000     WebUI http://<本机IP>:6099   （登录账号 ${BACKUP_QQ:-待扫码}）
 
    ▶ 下一步（必须）：
      1. 扫码登录：浏览器打开
           主号 WebUI: http://<本机IP>:6100  （或 http://127.0.0.1:6100 经 SSH 转发）
           副号 WebUI: http://<本机IP>:6099
         扫码后 NapCat 自动快速登录并绑定 OneBot 端口（网络已预置，无需重启）
+     1b. 账号激活：安装只做到"硬件/环境 + 设备维度试用"，
+        账号请扫码登录后，在机器人对话里按提示自助完成激活/绑定管理员
+        （当前管理员: ${ADMIN_QQ:-未设置}）
      2. ⚠ 同一 QQ 号在别的服务器登录着会互踢——请先下线旧设备再扫码
      3. 试用/授权：系统按 machine-id 试用期 14 天运行，正式授权在
         Web 管理端 / 或激活服务签发 license.json
