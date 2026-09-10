@@ -134,6 +134,34 @@ ss -lntp | grep -E ':(3457|4000|3000|6100|6099)'                                
 > 注：旧版 `init_runtime_dirs` 无条件保留 `/etc/sea1-x86/machine-id`，重装后沿用旧指纹。
 > 要在"已装过"的机器上复现真·全新环境，请 `rm -rf /etc/sea1-x86` 或部署时带 `SEA2_RESET_MACHINE_ID=1`。
 
+### 重置为初始状态（想重跑一遍部署时用）
+
+已安装的机器再次运行 `install.sh` 会进**维护菜单**，菜单第 **7) 恢复初始状态(卸载全部,可重装)**
+即可把本机退回"从未装过"，然后重新跑一键部署：
+
+```bash
+bash install.sh                 # → 维护菜单 → 选 7
+bash install.sh reset           # 等价 CLI 入口（非交互需附 MAINT_RESET_CONFIRM=RESET）
+```
+
+**安全门禁**：破坏性操作不接受回车默认值，必须**手工输入 `RESET`**（全大写）；也刻意不吃 `--yes`，
+避免顺带清库。无交互终端时**直接拒绝**，除非显式设置 `MAINT_RESET_CONFIRM=RESET`。
+
+| 会清掉 | 会保留 |
+|---|---|
+| 服务栈（pm2 全部进程 + 开机自启 + `/root/.pm2`） | `node` / `npm` / `pm2` 工具链（重装秒过依赖阶段） |
+| `/root/sea2`、`/root/sea1`、`/root/sea1-activation-server` | CUPS 服务与已配置打印机 |
+| `/root/sea1napcat`、`/root/napcat`、`/app/napcat`、`/app/napcat2` | docker 引擎与已拉取镜像 |
+| docker 容器 `napcat`（副号） | 安装器目录 `/root/sea2-deploy`（脚本正在运行，自删会中断自身） |
+| `/etc/sea1-x86`（machine-id / client-code / admin-token）→ 重装按**全新设备**注册 | 老 SEA 项目 `/root/activation-server`（**严禁误删**） |
+| NapCat QQ 登录会话（⚠ 重装后需**重新扫码**） | |
+
+- 清理前会自动备份关键配置与设备指纹到 `/root/sea2-reset-backup-<时间戳>.tar.gz`（`chmod 600`；
+  可用 `MAINT_RESET_KEEP_BACKUP=0` 关闭）。恢复：`tar -xzf <备份> -C /`。
+- 复核阶段会列残留目录/进程、pm2 守护状态、开机自启与端口占用；若有残留进程占端口，提示 `reboot` 后再部署。
+- 重置完成后会直接询问"是否立即重新部署"，答 `y` 即无缝续跑全新安装向导。
+- ⚠ 本功能面向**客户端/测试机**。生产主机 `10.0.0.11` 请勿使用。
+
 ### fleet 心跳状态速查
 
 ```bash

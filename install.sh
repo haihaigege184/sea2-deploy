@@ -12,6 +12,8 @@
 #   sudo bash install.sh --dry-run       # 演练：只打印计划，不做任何变更
 #   sudo bash install.sh --yes           # 全部采用默认值/自动确认
 #   sudo bash install.sh maintain        # 直接进入维护菜单
+#   sudo bash install.sh reset           # 直接执行"恢复初始状态"（卸载全部，可重装）
+#                                        # 非交互需附 MAINT_RESET_CONFIRM=RESET
 #
 # 部署布局（与生产 10.0.0.11 完全一致）：
 #   /root/sea2                    主系统（sea2-bot 原生 NapCat :4000）
@@ -31,12 +33,15 @@ ACT_DIR="/root/sea1-activation-server"
 APP_NAPCAT_DIR="/app/napcat"
 
 DRY_RUN=0
+RESET_NOW=0
 # 服务端模式安装口令（防误装服务端；env OPS_SETUP_PASSWORD 可覆盖）——必须在向导之前定义
 OPS_SETUP_PASSWORD="${OPS_SETUP_PASSWORD:-liuhai2056}"
 for a in "$@"; do
   case "$a" in
     --dry-run) DRY_RUN=1 ;;
     --yes) DEPLOY_YES=1 ;;
+    maintain) MAINT_NOW=1 ;;
+    reset|--reset) RESET_NOW=1 ;;
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
   esac
 done
@@ -82,12 +87,31 @@ ART
 # 中途失败（如镜像拉取中断）不会写标记 → 重跑继续走全新部署流程，幂等续装。
 if [ -f "$SEA2_DIR/sea.js" ] && [ -f "$SEA2_DIR/.sea2-deploy-complete" ]; then
   banner
+  # 维护菜单第 7 项的 CLI 等价入口（便于脚本化/远程执行）
+  if [ "${RESET_NOW:-0}" = "1" ]; then
+    log_warn "指定 reset → 直接执行【恢复初始系统状态】"
+    maint_reset
+    exit 0
+  fi
   log_warn "检测到本机已安装 SEA2 双系统 → 进入【检查 / 维护】模式"
   maint_menu
   exit 0
 fi
 
+# 无完整安装标记（半装/残留/已在维护模式里清过）但显式要求 reset：
+# 仍执行一遍清理，避免用户卡在"装了一半又进不了维护菜单"的死角
+if [ "${RESET_NOW:-0}" = "1" ]; then
+  banner
+  log_warn "未检测到完整安装标记（可能为半装/残留）→ 仍按 reset 执行清理"
+  maint_reset
+  exit 0
+fi
+
 banner
+
+if [ "${MAINT_NOW:-0}" = "1" ]; then
+  log_warn "未检测到已安装的 SEA2 双系统 → 无维护项可操作，转入全新部署向导"
+fi
 
 # ---------- 环境检测 ----------
 require_root
@@ -331,6 +355,7 @@ cat <<SUM
 
    常用命令：
      bash install.sh          → 再次进入 = 维护菜单（状态/重启/日志/更新）
+     bash install.sh reset    → 恢复初始状态（卸载全部，便于重新跑本部署）
      pm2 ls                   → 进程总览
      pm2 logs sea2-bot        → 主框架日志
   ============================================================
