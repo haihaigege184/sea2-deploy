@@ -4,15 +4,85 @@
 # ==========================================================================
 
 C_INFO='\033[1;36m'; C_OK='\033[1;32m'; C_WARN='\033[1;33m'
-C_ERR='\033[1;31m'; C_STEP='\033[1;35m'; C_OFF='\033[0m'
+C_ERR='\033[1;31m'; C_STEP='\033[1;35m'; C_DIM='\033[2;37m'; C_OFF='\033[0m'
 
 log_info() { printf '%b[info]%b %s\n'    "$C_INFO" "$C_OFF" "$*"; }
 log_ok()   { printf '%b[ok]%b   %s\n'    "$C_OK"   "$C_OFF" "$*"; }
 log_warn() { printf '%b[warn]%b %s\n'    "$C_WARN" "$C_OFF" "$*" >&2; }
 log_err()  { printf '%b[err]%b  %s\n'    "$C_ERR"  "$C_OFF" "$*" >&2; }
-log_step() { printf '\n%b== %s ==%b\n'   "$C_STEP" "$*"      "$C_OFF"; }
-
+# 阶段标题：进入新阶段前**自动结算上一阶段耗时**（零侵入 —— 不必在每个阶段末尾补调用）
+# 目的：用户能一眼看出每一步花了多久、是否卡住（长时间无输出时最有用）。
+log_step() {
+  if [ -n "${_STEP_T0:-}" ]; then _emit_step_done; fi
+  printf '\n%b== %s ==%b\n' "$C_STEP" "$*" "$C_OFF"
+  _STEP_T0="$(now_ms)"; _STEP_NAME="$*"
+}
 die() { log_err "$*"; exit 1; }
+
+# ==========================================================================
+# 计时（部署每步显示耗时 —— 用户据此判断流程是否卡住）
+# ==========================================================================
+now_ms() { date +%s%3N 2>/dev/null || printf '%s' "$(( $(date +%s) * 1000 ))"; }
+
+# 毫秒 → 人类可读（12.3s / 1m23s）
+_fmt_dur() {
+  awk -v ms="${1:-0}" 'BEGIN{ s=ms/1000; if (s<60) printf "%.1fs", s; else printf "%dm%02ds", int(s/60), int(s%60) }'
+}
+
+# 结算当前阶段耗时（内部使用；step_done 为对外入口）
+_emit_step_done() {
+  local _ms=$(( $(now_ms) - ${_STEP_T0:-$(now_ms)} ))
+  printf '   %b⏱ %s 用时 %s%b\n' "$C_DIM" "${1:-${_STEP_NAME:-}}" "$(_fmt_dur "$_ms")" "$C_OFF"
+}
+
+# step_done [标签] —— 显式结算当前阶段耗时（无起点时静默；可重复调用）
+step_done() {
+  [ -n "${_STEP_T0:-}" ] || return 0
+  _emit_step_done "$@"
+  _STEP_T0=""
+}
+
+# step_timed <标签> <命令...> —— 临时包裹一段命令并打印耗时（用于阶段内的小步骤）
+step_timed() {
+  local _label="$1"; shift
+  local _t0; _t0="$(now_ms)"
+  local _rc=0
+  "$@" || _rc=$?
+  printf '   %b⏱ %s 用时 %s%b\n' "$C_DIM" "$_label" "$(_fmt_dur $(( $(now_ms) - _t0 )))" "$C_OFF"
+  return $_rc
+}
+
+# ==========================================================================
+# 中央服务端地址脱敏（对外展示一律「线路N」）
+# ==========================================================================
+# 为什么：部署日志会被截图/贴群/发帖，其中不该出现任何中央接口地址。
+# 内部仍用真实 URL 通信，只在**输出层**做替换，不影响任何请求。
+# 运维本地排查时：SEA2_SHOW_ENDPOINTS=1 bash install.sh → 显示真实地址。
+declare -A _SEA2_LINE_MAP=()
+_SEA2_LINE_SEQ=0
+
+# line_label <url> → 线路N（同址恒定；按首次出现顺序编号，种子顺序即 线路1..线路N）
+line_label() {
+  local u="${1%/}"
+  if [ -z "$u" ]; then printf '线路?'; return 0; fi
+  if [ -n "${_SEA2_LINE_MAP[$u]:-}" ]; then printf '%s' "${_SEA2_LINE_MAP[$u]}"; return 0; fi
+  _SEA2_LINE_SEQ=$(( _SEA2_LINE_SEQ + 1 ))
+  _SEA2_LINE_MAP[$u]="线路${_SEA2_LINE_SEQ}"
+  printf '%s' "${_SEA2_LINE_MAP[$u]}"
+}
+
+# endpoint_text <url> → 脱敏后的展示串
+# 只对「已编号的中央服务端线路」脱敏；其他地址（GitHub 公开仓库、本机地址等）原样返回，
+# 避免把公开信息也变成无意义的「线路N」。
+endpoint_text() {
+  if [ "${SEA2_SHOW_ENDPOINTS:-0}" = "1" ]; then printf '%s' "$1"; return 0; fi
+  local u="${1%/}"
+  if [ -n "$u" ] && [ -n "${_SEA2_LINE_MAP[$u]:-}" ]; then
+    printf '%s' "${_SEA2_LINE_MAP[$u]}"
+  else
+    printf '%s' "$1"
+  fi
+}
 
 # _read_input <提示> <默认值> → 结果写入 $REPLY
 # 关键点：`curl ... | bash` 时 stdin 是管道，read 会立刻 EOF（还会吃掉脚本后续字节），

@@ -62,8 +62,33 @@ fetch() { # fetch <url> <dest>
 DEST="/root/sea2-deploy.tar.gz"
 SOURCES=()
 
-# 运维中心分发节点（公网隧道 + 内网直连）：全部公开，全国可用
-SEA2_NODES="http://sea1.xsian.top http://sea2.hk1.sian.one http://sea3.gost.cloudns.ch http://sea4.gost.nyc.mn http://sea1bot888.locvps.sian.one http://10.0.0.11:3457"
+# 运维中心分发节点（公网线路 + 内网直连）
+# ⚠ 顺序必须与 install.sh 的 SEA2_SEED_SERVERS 保持一致：
+#   这样「线路N」在引导阶段和部署阶段指向同一台节点，用户对照不会错位。
+SEA2_NODES="http://10.0.0.11:3457 http://sea1.xsian.top http://sea2.hk1.sian.one http://sea3.gost.cloudns.ch http://sea4.gost.nyc.mn http://sea1bot888.locvps.sian.one"
+
+# ---- 输出层脱敏：引导过程同样不得暴露任何中央接口地址 ----
+# 真实地址只用于实际请求，这里仅替换「打印出来的字符串」，不影响任何下载/测速行为。
+# 需要看真址排查时：SEA2_SHOW_ENDPOINTS=1 bash bootstrap.sh
+# 注意：本函数会被写在 $( ) 命令替换里（子 shell），所以必须是纯只读的，不能改全局状态。
+_line_no() { # <url> → 该节点在 SEA2_NODES 中的序号（1 起）
+  local u="$1" i=1 n
+  for n in $SEA2_NODES; do
+    [ "$n" = "$u" ] && { printf '%d' "$i"; return 0; }
+    i=$((i+1))
+  done
+  return 1
+}
+show_url() { # 中央节点 → 线路N（保留分发路径）；其余公开地址（GitHub 等）原样显示
+  [ "${SEA2_SHOW_ENDPOINTS:-0}" = "1" ] && { printf '%s' "$1"; return 0; }
+  local u="$1" base rest n
+  case "$u" in http://*|https://*) ;; *) printf '%s' "$u"; return 0 ;; esac
+  base="${u%%/downloads/*}"
+  if [ "$base" != "$u" ]; then rest="/${u#"$base"/}"; else base="$u"; rest=""; fi
+  if n="$(_line_no "$base")"; then printf '线路%s%s' "$n" "$rest"; return 0; fi
+  printf '%s' "$u"
+}
+
 BEST_NODE=""; BEST_MS=999999
 pick_fastest() { # 测速选最快可达节点（内网不可达自动走隧道）
   # ⚠ 兜底必须写在命令替换之外：curl 带 -w 时即使失败也会输出 "0.000000"，
@@ -72,20 +97,21 @@ pick_fastest() { # 测速选最快可达节点（内网不可达自动走隧道�
   local u ms t
   for u in $SEA2_NODES; do
     t=$(curl -s -o /dev/null -w '%{time_total}' --connect-timeout 4 --max-time 8 "$u/api/shop/info" 2>/dev/null) || t=""
-    if [ -z "$t" ]; then log "测速 $u → 不可达，跳过"; continue; fi
+    if [ -z "$t" ]; then log "测速 $(show_url "$u") → 不可达，跳过"; continue; fi
     ms=$(printf '%s' "$t" | awk '{printf "%d", $1*1000}')
-    case "$ms" in ''|*[!0-9]*) log "测速 $u → 响应异常，跳过"; continue ;; esac
-    log "测速 $u → ${ms}ms"
+    case "$ms" in ''|*[!0-9]*) log "测速 $(show_url "$u") → 响应异常，跳过"; continue ;; esac
+    log "测速 $(show_url "$u") → ${ms}ms"
     if [ "$ms" -lt "$BEST_MS" ]; then BEST_NODE="$u"; BEST_MS="$ms"; fi
   done
-  [ -n "$BEST_NODE" ] && [ "$BEST_MS" -lt 900000 ]
+  if [ -n "$BEST_NODE" ] && [ "$BEST_MS" -lt 900000 ]; then return 0; fi
+  return 1
 }
 
 # 服务端分发优先（可选）：运维中心 /downloads/sea2-deploy.tar.gz，内网/隧道可达时最快最稳
 [ -n "${SEA2_TARBALL_URL:-}" ] && SOURCES+=("$SEA2_TARBALL_URL")
 
 if [ "${FORCE_MIRROR:-}" != "github" ] && pick_fastest; then
-  ok "最快分发节点: $BEST_NODE（${BEST_MS}ms）"
+  ok "最快分发线路: $(show_url "$BEST_NODE")（${BEST_MS}ms）"
   SOURCES+=("$BEST_NODE/downloads/sea2-deploy.tar.gz")
   # 其余节点作同轮兜底（不重复测速，仅换源重试）
   for u in $SEA2_NODES; do
@@ -103,7 +129,7 @@ esac
 mkdir -p /root
 downloaded=""
 for u in "${SOURCES[@]}"; do
-  log "下载仓库: $u"
+  log "下载仓库: $(show_url "$u")"
   if fetch "$u" "$DEST" && [ "$(stat -c%s "$DEST" 2>/dev/null || echo 0)" -gt 100000 ]; then
     downloaded="$u"; break
   fi

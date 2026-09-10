@@ -3,8 +3,9 @@
 # lib/central.sh — 客户端模式：中央服务端选路 / 连接验证 / 设备试用激活
 # ==========================================================================
 
-# 公网/内网自适应种子（隧道域名属公开信息，可随仓库分发；顺序无关，全部参与测速）
-# 内网机器会自然命中 10.0.0.11（延迟最低），公网机器命中隧道，无需人工区分。
+# 公网/内网自适应种子：真实地址仅用于内部通信，
+# 日志/错误/完成页一律经 endpoint_text 显示为「线路N」（需求：部署日志不得暴露中央接口）。
+# 顺序即编号：SEA2_SEED_SERVERS 第 1 项 = 线路1，与 bootstrap.sh 的 SEA2_NODES 保持一致。
 SEA2_SEED_SERVERS=(
   "http://10.0.0.11:3457"
   "http://sea1.xsian.top"
@@ -15,10 +16,10 @@ SEA2_SEED_SERVERS=(
 )
 
 # select_central_server: 测速选最快可达者（公网/内网自适应）
-#   ① 探测种子（用户指定 → 内网 → 公网隧道），任一个可达即拿到服务端维护的完整隧道池
-#   ② 候选 = 池内公网地址 + masterAddress + 全部种子（去重）
+#   ① 探测种子（用户指定 → 内网 → 公网隧道），任一个可达即拿到服务端维护的完整线路池
+#   ② 候选 = 池内线路 + 全部种子（去重）
 #   ③ 逐个测速取最快；全不可达才报错
-#   输出: CENTRAL_SERVER（全局）
+#   输出: CENTRAL_SERVER（全局，真实地址，仅内部使用）
 select_central_server() {
   if [ "${DEPLOY_MODE:-server}" = "server" ]; then
     CENTRAL_SERVER="http://127.0.0.1:3457"
@@ -31,20 +32,23 @@ select_central_server() {
     if _valid_http_url "$CENTRAL_SERVER"; then
       probe+=("${CENTRAL_SERVER%/}")
     else
-      log_warn "忽略非法的中央服务端地址: $CENTRAL_SERVER（回退自动测速选路）"
+      # 不回显用户输入：那多半是误粘的命令（含地址/换行），回显等于把接口地址打进日志
+      log_warn "接入线路地址非法（输入不是合法 URL）→ 已忽略，改为自动测速选路"
       CENTRAL_SERVER=""
     fi
   fi
+  # 先给全部种子按固定顺序预编号 →「线路N」与具体地址一一对应且跨次运行稳定
   for u in "${SEA2_SEED_SERVERS[@]}"; do probe+=("${u%/}"); done
+  for u in "${probe[@]}"; do if [ -n "$u" ]; then line_label "$u" >/dev/null; fi; done
 
-  # ① 拿隧道池（内网不可达时自动走公网隧道，无需人工指定）
+  # ① 拿线路池（内网不可达时自动走公网隧道，无需人工指定）
   local raw=""
   for u in "${probe[@]}"; do
     [ -n "$u" ] || continue
     raw=$(curl -fsSL --connect-timeout 4 --max-time 10 "${u}/api/deploy/tunnels" 2>/dev/null) || raw=""
-    # 必须确认是真的隧道池 JSON，而不是任意字符串（否则会被当成有效池继续用）
+    # 必须确认是真的线路池 JSON，而不是任意字符串（否则会被当成有效池继续用）
     if [ -n "$raw" ] && printf '%s' "$raw" | jq -e '.tunnels' >/dev/null 2>&1; then
-      pool_json="$raw"; log_info "隧道池来源: $u"; break
+      pool_json="$raw"; log_info "从 $(endpoint_text "$u") 获取线路列表"; break
     fi
   done
 
@@ -55,7 +59,7 @@ select_central_server() {
       [ -n "$u" ] && candidates+=("${u%/}")
     done < <(printf '%s' "$pool_json" | jq -r '.tunnels[]?.publicAddr, .masterAddress? // empty' 2>/dev/null | grep -v '^$' | sort -u)
   else
-    log_warn "隧道池接口不可达，改用内置种子地址"
+    log_warn "线路列表接口不可达，改用内置线路"
   fi
   for u in "${probe[@]}"; do [ -n "$u" ] && candidates+=("$u"); done
 
@@ -67,6 +71,8 @@ select_central_server() {
     [ -n "$u" ] || continue
     [ -n "${seen[$u]:-}" ] && continue
     seen[$u]=1; uniq+=("$u")
+    # 池里新出现的线路也要先编号，否则 endpoint_text 认不出它 → 日志会漏出真实地址
+    line_label "$u" >/dev/null
   done
 
   # ③ 测速取最快
@@ -78,34 +84,35 @@ select_central_server() {
   for u in "${uniq[@]}"; do
     t=$(curl -fsSL --connect-timeout 5 --max-time 12 -o /dev/null -w '%{time_total}' "$u/api/shop/info" 2>/dev/null) || t=""
     if [ -z "$t" ]; then
-      log_info "测速 $u → 不可达，跳过"
+      log_info "测速 $(endpoint_text "$u") → 不可达，跳过"
       continue
     fi
     ms=$(printf '%s' "$t" | awk '{printf "%d", $1*1000}')
-    case "$ms" in ''|*[!0-9]*) log_info "测速 $u → 响应异常，跳过"; continue ;; esac
-    log_info "测速 $u → ${ms}ms"
+    case "$ms" in ''|*[!0-9]*) log_info "测速 $(endpoint_text "$u") → 响应异常，跳过"; continue ;; esac
+    log_info "测速 $(endpoint_text "$u") → ${ms}ms"
     if [ "$ms" -lt "$best_ms" ]; then best="$u"; best_ms="$ms"; fi
   done
   if [ -z "$best" ]; then
-    die "中央服务端全部候选地址不可达（内网地址与公网隧道均失败）。请检查网络后重跑"
+    die "所有接入线路均不可达（内网直连与公网线路全部失败）。请检查网络后重跑"
   fi
   # 最终兜底：只有确定为合法地址才允许写回，防止脏值流入配置渲染
-  _valid_http_url "$best" || die "内部错误：选出的中央服务端地址非法（$best）"
+  _valid_http_url "$best" || die "内部错误：选出的接入线路非法"
   CENTRAL_SERVER="$best"
-  log_ok "选定中央服务端: $CENTRAL_SERVER (${best_ms}ms)"
+  log_ok "选定接入线路: $(endpoint_text "$CENTRAL_SERVER")（延迟 ${best_ms}ms）"
 }
 
 # verify_central: 连接验证（部署硬门禁）
 # 不只判 HTTP 可达，还要确认真是激活服务（接口返回 ok=true），避免脏地址/错误站点被判"连通"
 verify_central() {
-  log_step "验证中央服务端连接"
-  _valid_http_url "${CENTRAL_SERVER:-}" || die "中央服务端地址非法: ${CENTRAL_SERVER:-<空>}"
+  log_step "验证接入线路连接"
+  _valid_http_url "${CENTRAL_SERVER:-}" || die "接入线路地址非法（内部错误）"
   local resp
   resp=$(curl -fsSL --connect-timeout 6 --max-time 15 "${CENTRAL_SERVER%/}/api/shop/info" 2>/dev/null) || resp=""
   if ! printf '%s' "$resp" | jq -e '.ok == true' >/dev/null 2>&1; then
-    die "中央服务端校验失败: $CENTRAL_SERVER（期望 /api/shop/info 返回 {\"ok\":true}，实际: ${resp:0:120}）"
+    die "接入线路校验失败: $(endpoint_text "$CENTRAL_SERVER")（服务未正常应答，请稍后重跑）"
   fi
-  log_ok "中央服务端连通: $CENTRAL_SERVER"
+  log_ok "接入线路连通正常: $(endpoint_text "$CENTRAL_SERVER")"
+  step_done
 }
 
 # activate_device_trial: 设备维度试用激活（查询即授予）+ 上线确认

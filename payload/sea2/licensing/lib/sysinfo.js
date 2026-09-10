@@ -19,11 +19,21 @@ const os = require('node:os');
 
 /**
  * 读取客户端版本号。
+ *
+ * [2026-09-10 代际标识修复] 优先读部署时落盘的 VERSION 文件，回退 package.json。
+ * 为什么要改：package.json 是历史遗留（name=sea1 / version=1.0.0），运维中心集群页
+ * 的「系统版本」会因此一直显示旧代际，无法区分 sea1 与 sea2 双系统。
  * @returns {string}
  */
 function readVersion() {
   try {
-    // 运行时相对路径：licensing/lib/sysinfo.js → ../../package.json = sea1/package.json
+    // 运行时相对路径：licensing/lib/sysinfo.js → ../../VERSION = sea2/VERSION
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const v = fs.readFileSync(path.join(__dirname, '..', '..', 'VERSION'), 'utf8').trim();
+    if (v) return 'sea2-dual-' + v;
+  } catch (e) { /* 无 VERSION 文件：继续回退 */ }
+  try {
     // 混淆单文件打包时该 require 会失败，走下方兜底。
     // eslint-disable-next-line global-require
     return require('../../package.json').version || '0.0.0';
@@ -99,7 +109,9 @@ async function getSysInfo(opts = {}) {
     cpu_usage,
     mem_usage,
     boot_time,
-    platform: os.platform(),
+    // 系统标识：显式标明 SEA2 双系统（os.platform() 只能给出 linux，无法区分代际；
+    // 运维中心集群页「系统」列据此识别，替代此前一律显示 linux 的模糊信息）。
+    platform: process.env.SEA2_PLATFORM || 'sea2-dual',
     arch: os.arch(),
     hostname: os.hostname(),
   };

@@ -49,6 +49,8 @@ done
 # ---------- 公共库 ----------
 # shellcheck source=lib/common.sh
 source "$LIB_DIR/common.sh"
+# shellcheck source=lib/qrterm.sh
+source "$LIB_DIR/qrterm.sh"
 # shellcheck source=lib/platform.sh
 source "$LIB_DIR/platform.sh"
 # shellcheck source=lib/deps.sh
@@ -67,6 +69,9 @@ source "$LIB_DIR/maintain.sh"
 
 [ "$(id -u)" = "0" ] || die "请用 root 执行：sudo bash install.sh"
 [ -f "$TPL_DIR/sea2.config.json.tmpl" ] || die "模板缺失（$TPL_DIR），请完整克隆本仓库"
+
+# 全程计时起点（收尾打印总耗时，用户据此判断整轮部署是否正常）
+INSTALL_T0="$(now_ms)"
 
 banner() {
   clear 2>/dev/null || true
@@ -185,6 +190,17 @@ if [ -n "$PRINTER_DEFAULT" ] && ! printf '%s' "$PRINTER_DEFAULT" | grep -qE '^[A
 fi
 PRINTERS_JSON="[\"$PRINTER_DEFAULT\"]"
 
+# 中间页对外地址（可选）：部署完成页要引导用户「手机扫码」打开中间页登录机器人账号，
+# 云服务器上本机内网 IP 手机扫了打不开，此处可填公网域名/端口映射地址。
+ask EXTERNAL_URL "    中间页对外地址（可选，手机扫码用；如 https://qr.example.com；回车=用本机内网IP）" ""
+if [ -n "$EXTERNAL_URL" ]; then
+  EXTERNAL_URL="${EXTERNAL_URL%/}"
+  if ! _valid_http_url "$EXTERNAL_URL"; then
+    log_warn "中间页对外地址非法（输入不是合法 URL）→ 已忽略，改用本机内网地址"
+    EXTERNAL_URL=""
+  fi
+fi
+
 if [ "$DEPLOY_MODE" = "server" ]; then
 ask DEPLOY_ACTIVATION "6/6 是否部署激活授权服务 :3457（回车=是 y）" "y"
 if [ "$DEPLOY_ACTIVATION" = "n" ] || [ "$DEPLOY_ACTIVATION" = "N" ]; then
@@ -194,13 +210,13 @@ else
   DEPLOY_ACTIVATION="y"
 fi
 else
-  # 客户端模式：中央服务端地址（内网直连或留空自动从隧道池测速选路）
-  ask CENTRAL_SERVER "6/6 中央服务端地址（回车=自动测速：内网优先，公网自动走隧道）" ""
+  # 客户端模式：接入线路地址（内网直连或留空自动测速选路）
+  ask CENTRAL_SERVER "6/6 接入线路地址（可选，回车=自动测速选路：内网优先，公网自动走接入线路）" ""
   # 硬校验：非 URL 内容（典型是误粘了整条命令）绝不能流入配置——否则会被拼进请求 URL，
   # 导致测速误判 0ms、连接校验误通过、客户端心跳持续 Invalid URL（实机发生过）。
   if [ -n "$CENTRAL_SERVER" ] && ! _valid_http_url "$CENTRAL_SERVER"; then
-    log_warn "中央服务端地址非法（当前=$CENTRAL_SERVER）→ 已忽略，改为自动测速选路"
-    log_warn "  正确写法示例: http://10.0.0.11:3457  或  https://your-domain.com"
+    log_warn "接入线路地址非法（输入不是合法 URL）→ 已忽略，改为自动测速选路"
+    log_warn "  正确写法: http://<内网IP或域名>:3457"
     CENTRAL_SERVER=""
   fi
   # 令牌优先从文件读取：明文写在命令行会进 shell history / ps / 部署日志
@@ -242,7 +258,7 @@ log_info "主号: ${MAIN_QQ:-（未设置 · 稍后控制台扫码登录）}（�
 log_info "副号: ${BACKUP_QQ:-（未设置 · 稍后控制台扫码登录）}（原生 NapCat 双实例 :3000，WebUI :6099）"
 log_info "管理员: ${ADMIN_QQ:-（未设置 · 稍后机器人对话自助激活）} | 通知群: ${NOTIFY_GROUPS:-（空）}"
 if [ "$DEPLOY_MODE" = "client" ]; then
-  log_info "部署模式: 客户端（中央服务端: 待测速选定）"
+  log_info "部署模式: 客户端接入（接入线路: 自动测速选定，不对外显示具体地址）"
 else
   log_info "部署模式: 服务端全套"
 fi
@@ -288,11 +304,11 @@ if command -v jq >/dev/null 2>&1; then
   done
   log_ok "配置 JSON 自检通过（sea2/sea1 config.json）"
 fi
-# 落盘自检：占位符校验查不出"格式合法但内容是垃圾"的值，这里对落盘的 URL 再做一次格式校验
+# 落盘自检：占位符校验查不出"格式合法但内容是垃圾"的值，这里对落盘的地址再做一次格式校验
 if [ "$DEPLOY_MODE" = "client" ]; then
   _sv="$(grep -m1 '^SEA2_SERVER_URL=' "$SEA2_DIR/napcat/ops.env" 2>/dev/null | cut -d= -f2-)"
-  _valid_http_url "$_sv" || die "配置落盘异常：ops.env 的 SEA2_SERVER_URL 非法（${_sv:-<空>}）"
-  log_ok "配置落盘自检通过（SEA2_SERVER_URL=$_sv）"
+  _valid_http_url "$_sv" || die "配置落盘异常：接入线路地址非法（内部错误）"
+  log_ok "配置落盘自检通过（接入线路: $(endpoint_text "$_sv")）"
 fi
 log_ok "配置渲染完成（无残留占位符）"
 
@@ -327,37 +343,74 @@ run_verify || true
 # 写安装完成标记（下次运行 install.sh 进入维护模式的依据）
 date -Iseconds > "$SEA2_DIR/.sea2-deploy-complete"
 
+# 收尾结算最后一段（健康检查）的耗时
+step_done
+
+TOTAL_DUR="$(_fmt_dur $(( $(now_ms) - INSTALL_T0 )))"
+# `|| true` 不能省：set -e + pipefail 下，若目标机 hostname 不支持 -I（或输出为空），
+# 整个赋值会失败 → 部署已全部完成却在打印完成页前退出（实机踩过）。
+LAN_IP="$( { hostname -I 2>/dev/null || true; } | awk '{print $1}')"
+[ -n "$LAN_IP" ] || LAN_IP="<本机IP>"
+# 中间页入口：优先用用户填写的对外地址（手机扫得到），否则回退本机内网 IP
+if [ -n "${EXTERNAL_URL:-}" ]; then
+  MID_BASE="$EXTERNAL_URL"
+  MID_HINT="　（已使用上面填写的对外地址，手机可直接扫码）"
+else
+  MID_BASE="http://${LAN_IP}:13011"
+  MID_HINT="　（手机需与服务器同网段；云服务器请重跑 bash install.sh 填写「中间页对外地址」）"
+fi
+MID_LOGIN="${MID_BASE}/s"
+MID_PAGE="${MID_BASE}/"
+MID_QR_PNG="${MID_BASE}/fixed.png"
+
 printf '%b' "$C_OK"
 cat <<SUM
 
   ============================================================
-   ✅ SEA2 双系统部署完成
+   ✅ SEA2 双系统部署完成                          总耗时 ${TOTAL_DUR}
   ============================================================
-   激活服务   http://$(hostname -I 2>/dev/null | awk '{print $1}'):3457
-   主框架HTTP :13001    副框架HTTP :13000
-   打印服务   :13012    扫码中间页 :13011
-   主号NapCat :4000     WebUI http://<本机IP>:6100   （登录账号 ${MAIN_QQ:-待扫码}）
-   副号NapCat :3000     WebUI http://<本机IP>:6099   （登录账号 ${BACKUP_QQ:-待扫码}）
+SUM
+if [ "$DEPLOY_MODE" = "client" ]; then
+  # 客户端模式：只显示线路代号，绝不输出任何中央接口地址（日志会被截图/贴群）
+  printf '   接入线路   %s（自动测速选定，已连通）\n' "$(endpoint_text "${CENTRAL_SERVER:-}")"
+else
+  printf '   激活授权   http://%s:3457  （本机服务端）\n' "$LAN_IP"
+fi
+cat <<SUM
+   主框架HTTP :13001    打印服务 :13012    扫码中间页 :13011
+   主号 QQ    :4000     WebUI :6100   （登录账号 ${MAIN_QQ:-待扫码}）
+   副号 QQ    :3000     WebUI :6099   （登录账号 ${BACKUP_QQ:-待扫码}）
+SUM
+printf '%b' "$C_OFF"
 
-   ▶ 下一步（必须）：
-     1. 扫码登录：浏览器打开
-          主号 WebUI: http://<本机IP>:6100  （或 http://127.0.0.1:6100 经 SSH 转发）
-          副号 WebUI: http://<本机IP>:6099
-        扫码后 NapCat 自动快速登录并绑定 OneBot 端口（网络已预置，无需重启）
-     1b. 账号激活：安装只做到"硬件/环境 + 设备维度试用"，
-        账号请扫码登录后，在机器人对话里按提示自助完成激活/绑定管理员
-        （当前管理员: ${ADMIN_QQ:-未设置}）
-     2. ⚠ 同一 QQ 号在别的服务器登录着会互踢——请先下线旧设备再扫码
-     3. 试用/授权：系统按 machine-id 试用期 14 天运行，正式授权在
-        Web 管理端 / 或激活服务签发 license.json
-     4. 打印机：cups 已安装，配置打印机后中间页/插件即可打单
-        （lpstat -p 查看队列名，需与 /root/sea2/config.json 的 printer.default 一致）
+qr_or_link "▶ 第 1 步（必须）：手机扫码登录机器人账号" \
+  "$MID_LOGIN" "$MID_PAGE"
+
+cat <<SUM
+${MID_HINT}
+     扫码后即进入登录中间页：可选择「主号 / 副号」并扫描 QQ 登录二维码。
+     登录成功后 NapCat 自动绑定 OneBot 端口（网络已预置，无需重启）。
+     中间页固定二维码（可随时重扫 / 转发他人）: ${MID_QR_PNG}
+     中间页入口（本机浏览器亦可打开）        : ${MID_PAGE}
+
+   ▶ 第 2 步：账号激活（安装只做到"硬件/环境 + 设备维度试用"）
+     账号登录后，在机器人对话里按提示自助完成激活 / 绑定管理员
+     （当前管理员: ${ADMIN_QQ:-未设置}）
+
+   ▶ 第 3 步：打印机（可选）
+     cups 已安装；接好打印机后在集群/中间页配置，或执行：
+       lpstat -p             # 查看队列名
+       lpadmin -p <队列名> -E -v <设备URI> -m everywhere
+
+   ⚠ 注意事项
+     · 同一 QQ 号在别的服务器登录着会互踢——请先下线旧设备再扫码
+     · 授权按 machine-id 记 14 天试用期，正式授权由运维中心签发
+     · 设备已自动纳入运维中心集群，可在集群页统一管理（重启/打印机/配置/进程）
 
    常用命令：
      bash install.sh          → 再次进入 = 维护菜单（状态/重启/日志/更新）
      bash install.sh reset    → 恢复初始状态（卸载全部，便于重新跑本部署）
-     pm2 ls                   → 进程总览
-     pm2 logs sea2-bot        → 主框架日志
+     pm2 ls                   → 进程总览      pm2 logs sea2-bot → 主框架日志
   ============================================================
 SUM
 printf '%b\n' "$C_OFF"

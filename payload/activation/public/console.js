@@ -1228,6 +1228,99 @@
     }
   }
 
+  // ---------------- 统一管理（集群集中化）----------------
+  /**
+   * 统一管理面板：把原本分散在「进程管理 / 打印与 CUPS / 设备管理」的能力收拢到集群页，
+   * 对已勾选设备一次性下发 —— 免去多视图来回跳转（需求：集群内统一设备管理）。
+   * 所有动作仍走同一契约通道 POST /clients/:mid/command，危险项复用 confirmDangerous 强确认，
+   * 不新增任何绕过服务端门禁的路径。
+   */
+  var UMGR_PROCS = ['sea2-bot', 'sea2-print-server', 'sea2-qr', 'sea2-napcat',
+    'sea2-napcat-backup', 'sea2-watchdog', 'sea1-client', 'sea1-bot'];
+
+  function openUnifiedMgr() {
+    var targets = Object.keys(SEL_MIDS).filter(function (k) { return SEL_MIDS[k]; });
+    if (!targets.length) { toast('请先勾选设备', 'warn'); return; }
+    if (!requireWrite('统一管理 ' + targets.length + ' 台设备')) return;
+
+    var sec = 'style="border:1px solid rgba(127,127,127,.35);border-radius:8px;padding:10px 12px;margin:10px 0"';
+    var h4 = 'style="margin:0 0 8px;font-size:14px"';
+    var h = '<p>将对已勾选的 <b>' + targets.length + '</b> 台设备执行操作（进度与结果见批量弹窗）。</p>';
+
+    h += '<div ' + sec + '><h4 ' + h4 + '>① 进程</h4>' +
+      '<select id="umgrProc" style="max-width:200px">' + UMGR_PROCS.map(function (p) {
+        return '<option value="' + esc(p) + '">' + esc(p) + '</option>';
+      }).join('') + '</select> ' +
+      [['pm2_list', '列表'], ['pm2_restart', '重启'], ['pm2_stop', '停止'], ['pm2_start', '启动'], ['pm2_logs', '最近100行日志']]
+        .map(function (a) { return '<button class="btn ghost sm" data-um="' + a[0] + '">' + a[1] + '</button> '; }).join('') +
+      '<div class="filter-tip">列表 / 日志为回执型指令，结果在设备详情「指令历史」中展开查看。</div></div>';
+
+    h += '<div ' + sec + '><h4 ' + h4 + '>② 打印</h4>' +
+      '<input id="umgrPrinter" type="text" placeholder="打印机队列名（如 HP_LaserJet_P2015_Series）" style="max-width:300px" /> ' +
+      [['enable_printer', '启用'], ['disable_printer', '停用'], ['printer_default', '设为默认'],
+        ['clear_print_queue', '清空队列'], ['cups_info', 'CUPS 状态']]
+        .map(function (a) { return '<button class="btn ghost sm" data-um="' + a[0] + '">' + a[1] + '</button> '; }).join('') +
+      '<div class="filter-tip">「设为默认」经下发配置 printer.default 生效（仅白名单键会被客户端接受）。</div></div>';
+
+    h += '<div ' + sec + '><h4 ' + h4 + '>③ 服务与下发</h4>' +
+      '<input id="umgrNotice" type="text" placeholder="通知内容（≤500 字，推送到通知群）" style="max-width:320px" /> ' +
+      [['push_notice', '推送通知'], ['health_check', '健康检查'], ['enable_client', '启用客户端']]
+        .map(function (a) { return '<button class="btn ghost sm" data-um="' + a[0] + '">' + a[1] + '</button> '; }).join('') + '</div>';
+
+    openModal('统一管理（' + targets.length + ' 台设备）', h,
+      [{ label: '关闭', cls: 'ghost', onClick: closeModal }]);
+
+    $('modalBody').querySelectorAll('[data-um]').forEach(function (b) {
+      b.addEventListener('click', function () { unifiedAction(b.dataset.um, targets); });
+    });
+  }
+
+  /** 单个统一管理动作 → 组装契约载荷 → 走既有 runBatch（危险项自动二次确认） */
+  function unifiedAction(kind, targets) {
+    var proc = $('umgrProc') ? $('umgrProc').value : '';
+    var pname = $('umgrPrinter') ? ($('umgrPrinter').value || '').trim() : '';
+    var notice = $('umgrNotice') ? ($('umgrNotice').value || '').trim() : '';
+    var action;
+    var payload = {};
+
+    switch (kind) {
+      case 'pm2_list': action = 'pm2_list'; break;
+      case 'pm2_restart': case 'pm2_stop': case 'pm2_start':
+        action = kind; payload = { processName: proc }; break;
+      case 'pm2_logs': action = 'pm2_logs'; payload = { processName: proc, lines: 100 }; break;
+      case 'enable_printer': case 'disable_printer':
+        action = kind; payload = { printerName: pname }; break;
+      case 'printer_default':
+        action = 'push_config'; payload = { config: { printer: { default: pname } } }; break;
+      case 'clear_print_queue': action = 'clear_print_queue'; break;
+      case 'cups_info': action = 'cups_info'; break;
+      case 'push_notice':
+        action = 'push_notice'; payload = { text: notice, target: 'groups' }; break;
+      case 'health_check': action = 'health_check'; break;
+      case 'enable_client': action = 'enable_client'; break;
+      default: toast('未知操作', 'warn'); return;
+    }
+
+    if ((kind === 'enable_printer' || kind === 'disable_printer' || kind === 'printer_default')) {
+      if (!/^[A-Za-z0-9._-]{1,64}$/.test(pname)) {
+        toast('打印机队列名只允许字母、数字、点、下划线、连字符', 'warn'); return;
+      }
+    }
+    if (kind === 'push_notice' && !notice) { toast('请填写通知内容', 'warn'); return; }
+    if (kind === 'push_notice' && notice.length > 500) { toast('通知内容超长（最多 500 字）', 'warn'); return; }
+
+    var sp = specOfAction(action);
+    var label = (sp && sp.label) || action;
+    var note = (kind === 'printer_default') ? '（默认打印机改为 ' + pname + '）' : '';
+    if (sp && sp.dangerous) {
+      confirmDangerous(sp, '<b>' + targets.length + '</b> 台设备' + esc(note), function (word) {
+        runBatch(targets, action, payload, label, word);
+      });
+      return;
+    }
+    runBatch(targets, action, payload, label, '');
+  }
+
   // 分布条点击：写入对应维度筛选并重渲染（再次点击同一项 = 取消该筛选）
   function distPick(kind, key) {
     // 「其他」「未知」是聚合桶而非真实取值，不能拿去当筛选条件
@@ -2186,6 +2279,8 @@
     $('bulkAct').addEventListener('change', syncBulkPayload);
     // 批量下发：并发上限取自 meta.limits.batchConcurrency
     $('bulkSend').addEventListener('click', doBulkSend);
+    // 统一管理：进程/打印/配置集中面板（分散设置收拢到集群，免多视图跳转）
+    if ($('bulkUnified')) $('bulkUnified').addEventListener('click', openUnifiedMgr);
     // FLEET：打印机
     $('prnRefresh').addEventListener('click', renderFleetPrinters);
     $('prnQ').addEventListener('input', debounce(renderFleetPrinters, 350));

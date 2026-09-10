@@ -47,7 +47,9 @@ download_linuxqq() {
   candidates+=("https://ghfast.top/${QQ_RELEASE_BASE}/linuxqq_${QQ_VERSION}_${arch}.deb")
   local u size
   for u in "${candidates[@]}"; do
-    log_info "尝试下载: $u"
+    # 候选里混有运维中心分发地址（属中央接口）与腾讯/GitHub 公开地址：
+    # endpoint_text 只对已编号的中央线路脱敏，公开地址原样显示（便于排查）。
+    log_info "尝试下载: $(endpoint_text "$u")"
     if curl -fL --retry 2 --connect-timeout 10 --max-time 1800 -o "$tmp" "$u" 2>/dev/null; then
       size=$(stat -c%s "$tmp" 2>/dev/null || echo 0)
       if [ "$size" -gt 50000000 ]; then

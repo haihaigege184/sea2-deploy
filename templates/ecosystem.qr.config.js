@@ -10,6 +10,8 @@ module.exports = {
       PORT: '13011',
       WEBUI_PORT: '6100',
       BACKUP_WEBUI_PORT: '6099',
+      // 中间页对外地址（可选）：留空则用本机内网 IP，手机扫码需能访问该地址
+      EXTERNAL_URL: '__EXTERNAL_URL__',
       SEA2_OWN_QQ: '__MAIN_QQ__',
       SEA2_BACKUP_QQ: '__BACKUP_QQ__',
       SEA2_MAIN_NAPCAT_URL: 'http://127.0.0.1:4000',

@@ -3,12 +3,21 @@
 # lib/verify.sh — 部署后健康检查
 # ==========================================================================
 
+# 展示用地址：本机回环地址原样（属公开信息且便于排查），
+# 外部（中央服务端）地址一律经 endpoint_text 脱敏为「线路N」。
+_verify_show() {
+  case "$1" in
+    http://127.0.0.1:*|http://localhost:*|https://127.0.0.1:*|https://localhost:*) printf '%s' "$1" ;;
+    *) endpoint_text "$1" ;;
+  esac
+}
+
 check_http() { # check_http 名称 url
   if http_ok "$2"; then
-    log_ok "$1 ✓ ($2)"
+    log_ok "$1 ✓ ($(_verify_show "$2"))"
     return 0
   else
-    log_err "$1 ✗ ($2)"
+    log_err "$1 ✗ ($(_verify_show "$2"))"
     FAILS=$((FAILS+1))
     return 1
   fi
