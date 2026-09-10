@@ -103,6 +103,18 @@ fi
 # ---------- 交互式向导 ----------
 log_step "部署向导（回车采用默认值）"
 
+# 无可用交互终端且关键参数未预设 → 提前给出可照做的命令，避免逐项卡在"XX 非法"
+if ! _tty_ok; then
+  if [ -z "${MAIN_QQ:-}" ] || [ -z "${BACKUP_QQ:-}" ]; then
+    log_warn "未检测到可交互终端（/dev/tty 不可用），向导无法提问。"
+    die "请改用下列任一方式重跑：
+  A) 先落盘再执行（推荐，可正常交互）：
+     curl -fsSL http://sea1.xsian.top/downloads/bootstrap.sh -o /tmp/sea2.sh; bash /tmp/sea2.sh
+  B) 非交互一次性装完（把号换成你自己的）：
+     MAIN_QQ=主号 BACKUP_QQ=副号 ADMIN_QQ=管理员 bash /tmp/sea2.sh"
+  fi
+fi
+
 ask DEPLOY_MODE "0/6 部署模式：1=服务端全套 2=客户端接入（回车=2 客户端）" "2"
 if [ "$DEPLOY_MODE" = "1" ]; then
   ask OPS_PW "   服务端模式需验证运维密码" ""
@@ -115,14 +127,20 @@ else
 fi
 
 ask MAIN_QQ      "1/6 主号 QQ（主系统 sea2-bot，原生 NapCat :4000 登录的号）" ""
-[[ "$MAIN_QQ" =~ ^[0-9]{5,12}$ ]] || die "主号 QQ 非法（当前="${MAIN_QQ:-<空>}"）。
-  无终端/非交互环境请预设环境变量后重跑：MAIN_QQ=123456 bash install.sh
-  （管道执行 `curl|bash` 时向导读不到输入，建议先下载再执行：bash bootstrap.sh）"
+[[ "$MAIN_QQ" =~ ^[0-9]{5,12}$ ]] || die "主号 QQ 非法（当前=\"${MAIN_QQ:-<空>}\"）。
+  向导读不到输入（无可用交互终端）。二选一：
+    A) 先落盘再执行（推荐，可正常交互）：
+       curl -fsSL http://sea1.xsian.top/downloads/bootstrap.sh -o /tmp/sea2.sh; bash /tmp/sea2.sh
+    B) 非交互一次性装完（把号换成你自己的）：
+       MAIN_QQ=主号 BACKUP_QQ=副号 ADMIN_QQ=管理员 bash /tmp/sea2.sh"
 
 ask BACKUP_QQ    "2/6 副号 QQ（副系统原生 NapCat 双实例 :3000 登录的号，必须与主号不同）" ""
-[[ "$BACKUP_QQ" =~ ^[0-9]{5,12}$ ]] || die "副号 QQ 非法（当前="${BACKUP_QQ:-<空>}"）。
-  无终端/非交互环境请预设环境变量后重跑：BACKUP_QQ=123456 bash install.sh
-  （管道执行 `curl|bash` 时向导读不到输入，建议先下载再执行：bash bootstrap.sh）"
+[[ "$BACKUP_QQ" =~ ^[0-9]{5,12}$ ]] || die "副号 QQ 非法（当前=\"${BACKUP_QQ:-<空>}\"）。
+  向导读不到输入（无可用交互终端）。二选一：
+    A) 先落盘再执行（推荐，可正常交互）：
+       curl -fsSL http://sea1.xsian.top/downloads/bootstrap.sh -o /tmp/sea2.sh; bash /tmp/sea2.sh
+    B) 非交互一次性装完（把号换成你自己的）：
+       MAIN_QQ=主号 BACKUP_QQ=副号 ADMIN_QQ=管理员 bash /tmp/sea2.sh"
 [ "$MAIN_QQ" != "$BACKUP_QQ" ] || die "主副号必须不同（共号会互踢）"
 WITH_BACKUP=1
 

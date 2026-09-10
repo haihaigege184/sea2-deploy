@@ -17,13 +17,20 @@ die() { log_err "$*"; exit 1; }
 # _read_input <提示> <默认值> → 结果写入 $REPLY
 # 关键点：`curl ... | bash` 时 stdin 是管道，read 会立刻 EOF（还会吃掉脚本后续字节），
 # 所以一律从 /dev/tty 读；确实没有可用终端（CI/后台）时才回落默认值。
+# 能否真正打开控制终端？
+# 注意两点（实机踩坑）：
+#  ① 不能用 [ -r /dev/tty ] —— 那测的是权限位，无终端时 /dev/tty 仍显示 crw-rw-rw- 恒为真
+#  ② 2>/dev/null 必须写在 < /dev/tty 之前 —— bash 从左到右处理重定向，
+#     写在后面就吃不到 "No such device or address" 的报错
+_tty_ok() { : 2>/dev/null < /dev/tty; }
+
 _read_input() {
   local __prompt="$1" __d="$2" __in=""
-  if [ -c /dev/tty ] && [ -r /dev/tty ]; then
+  if _tty_ok; then
     if [ -n "$__d" ]; then
-      read -r -p "$__prompt [回车=($__d)]: " __in < /dev/tty 2>/dev/null || __in=""
+      read -r -p "$__prompt [回车=($__d)]: " __in 2>/dev/null < /dev/tty || __in=""
     else
-      read -r -p "$__prompt: " __in < /dev/tty 2>/dev/null || __in=""
+      read -r -p "$__prompt: " __in 2>/dev/null < /dev/tty || __in=""
     fi
   elif [ -n "$__d" ]; then
     log_info "无可用终端，采用默认值: $__prompt = $__d"
@@ -37,10 +44,10 @@ confirm() {
   if [ "${DEPLOY_YES:-0}" = "1" ]; then
     log_info "自动确认: $1（→ $hint）"; return 0
   fi
-  if [ ! -c /dev/tty ] || [ ! -r /dev/tty ]; then
+  if ! _tty_ok; then
     log_info "无可用终端，自动确认: $1（→ $hint）"; return 0
   fi
-  read -r -p "$1 [Y/n] (默认 $hint): " ans < /dev/tty 2>/dev/null || ans=""
+  read -r -p "$1 [Y/n] (默认 $hint): " ans 2>/dev/null < /dev/tty || ans=""
   ans="${ans:-$hint}"
   case "$ans" in y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
 }
