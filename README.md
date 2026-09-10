@@ -83,6 +83,18 @@ curl -fsSL http://10.0.0.11:3457/downloads/bootstrap.sh | sudo -E bash
 | `SEA1_ADMIN_TOKEN` | 空 | 运维中心令牌。**留空也能装完**：设备以「设备维度试用（14 天）」身份出现在集群页，后续在控制台签发授权码写入 `/etc/sea1-x86/client-code` 并 `pm2 restart sea1-client` 即可转正（client-agent 每 30 分钟也会自动重试领码） |
 | `SEA2_RESET_MACHINE_ID` | `0` | `1` = 强制清除 `/etc/sea1-x86/{machine-id,client-code}`，按**全新设备**重新注册。默认保留（重装不换身份，避免授权漂移），只有要模拟真·全新环境时才置 1 |
 | `MAIN_QQ` / `BACKUP_QQ` / `ADMIN_QQ` / `NOTIFY_GROUPS` | — | 向导其余项，预设即跳过提问 |
+| `SEA2_FLEET_CUSTOMER` | 空 | 客户端模式自动领码所用的**客户号**。默认按机器唯一（`x86-<machine_id 前16位>`）。**不要多台机器设成同一个值**（见下） |
+
+### 领码客户号：为什么必须每机唯一
+
+中央 `orders.js:157 _resolveMachineId(qq)` 在签发时会按客户号反查历史机器，把**新码直接预绑到那台机器**。
+若多台机器共用一个客户号（旧实现硬编码 `1000000001`），第二台起拿到的码 `bound_machine_id` 指向别人，
+`/api/activate` 必返回 **409「激活码已绑定其他设备」**，此后心跳长期 `machine-mismatch`，设备卡在"未授权"。
+
+- 默认行为已按机器唯一，无需干预；控制台"客户"列显示 `x86-xxxxxxxxxxxxxxxx`（这是机器授权码，不是用户会员）。
+- 确需把机器挂到真实客户名下：`SEA2_FLEET_CUSTOMER=<客户QQ>`，但**同一客户号同时只能有一台机器**。
+- 已经撞车的机器：`client-agent` 会自动调 `/api/admin/ops/binding` 换绑重试一次；换绑也失败则清除该码、
+  回落设备维度试用（不会静默卡死）。排障看 `pm2 logs sea1-client`。
 
 ### 全新环境判据（部署前自检）
 
