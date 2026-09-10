@@ -29,7 +29,7 @@ maint_restart() {
 
 maint_logs() {
   echo "1) sea2-bot  2) watchdog  3) qr-server  4) print-server  5) activation"
-  local n; read -r -p "选择 [1-5]: " n || n=1
+  local n; _read_input "选择 [1-5]" "1"; n="$REPLY"
   case "$n" in
     2) pm2 logs sea2-watchdog --lines 100 ;;
     3) pm2 logs sea2-qr --lines 100 ;;
@@ -83,7 +83,12 @@ maint_menu() {
     echo "  3) 查看日志          4) 健康检查"
     echo "  5) 更新代码(保留配置) 6) 配置文件说明"
     echo "  0) 退出"
-    local n; read -r -p "选择: " n || return 0
+    # 无交互终端（curl|bash 管道/后台）时直接退出菜单，避免 read 持续 EOF 导致空转刷屏
+    if ! _tty_ok; then
+      log_warn "无可用交互终端，退出维护菜单（如需操作请在本地终端重新执行）"
+      return 0
+    fi
+    local n; _read_input "选择" ""; n="$REPLY"
     case "$n" in
       1) maint_status ;;
       2) maint_restart ;;
@@ -91,7 +96,7 @@ maint_menu() {
       4) maint_check ;;
       5) maint_update ;;
       6) maint_config ;;
-      0|q|Q) return 0 ;;
+      0|q|Q|"") return 0 ;;
       *) log_warn "无效选择" ;;
     esac
   done

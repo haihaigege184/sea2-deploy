@@ -114,7 +114,7 @@ verify() {
     log "[DRY_RUN] 跳过实际健康检查"
     return 0
   fi
-  code="$(ssh "$SSH_HOST" "curl -sS -m 8 -o /dev/null -w '%{http_code}' http://127.0.0.1:$HEALTH_PORT$HEALTH_PATH" 2>/dev/null || echo 000)"
+  code=$(ssh "$SSH_HOST" "curl -sS -m 8 -o /dev/null -w '%{http_code}' http://127.0.0.1:$HEALTH_PORT$HEALTH_PATH" 2>/dev/null) || code="000"
   body="$(ssh "$SSH_HOST" "curl -sS -m 8 http://127.0.0.1:$HEALTH_PORT$HEALTH_PATH 2>/dev/null | head -c 200" 2>/dev/null || true)"
   log "HTTP $code  body: $body"
   if [ "$code" != "200" ]; then

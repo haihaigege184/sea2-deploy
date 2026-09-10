@@ -66,10 +66,15 @@ SOURCES=()
 SEA2_NODES="http://sea1.xsian.top http://sea2.hk1.sian.one http://sea3.gost.cloudns.ch http://sea4.gost.nyc.mn http://sea1bot888.locvps.sian.one http://10.0.0.11:3457"
 BEST_NODE=""; BEST_MS=999999
 pick_fastest() { # 测速选最快可达节点（内网不可达自动走隧道）
-  local u ms
+  # ⚠ 兜底必须写在命令替换之外：curl 带 -w 时即使失败也会输出 "0.000000"，
+  #   写成 ms=$(curl ... || echo 999) 会拼成 "0.000000999"，awk 取首字段得 0ms，
+  #   不可达节点反而被误判为"最快"并选中（实机踩坑，与 install.sh 测速同源）。
+  local u ms t
   for u in $SEA2_NODES; do
-    ms=$(curl -s -o /dev/null -w '%{time_total}' --connect-timeout 4 --max-time 8 "$u/api/shop/info" 2>/dev/null || echo 999)
-    ms=$(printf '%s' "$ms" | awk '{printf "%d", $1*1000}')
+    t=$(curl -s -o /dev/null -w '%{time_total}' --connect-timeout 4 --max-time 8 "$u/api/shop/info" 2>/dev/null) || t=""
+    if [ -z "$t" ]; then log "测速 $u → 不可达，跳过"; continue; fi
+    ms=$(printf '%s' "$t" | awk '{printf "%d", $1*1000}')
+    case "$ms" in ''|*[!0-9]*) log "测速 $u → 响应异常，跳过"; continue ;; esac
     log "测速 $u → ${ms}ms"
     if [ "$ms" -lt "$BEST_MS" ]; then BEST_NODE="$u"; BEST_MS="$ms"; fi
   done

@@ -27,11 +27,15 @@ _tty_ok() { : 2>/dev/null < /dev/tty; }
 _read_input() {
   local __prompt="$1" __d="$2" __in=""
   if _tty_ok; then
+    # ⚠ 提示必须自己 printf 到 stderr，绝不能用 read -p + 2>/dev/null：
+    #   read -p 的提示也走 stderr，一旦给 read 加 2>/dev/null（本意是吃掉 /dev/tty 打不开的报错），
+    #   提示会被一并吞掉 → 向导标题之后一片空白、按键无任何反馈，实机表现为"卡死没后续"。
     if [ -n "$__d" ]; then
-      read -r -p "$__prompt [回车=($__d)]: " __in 2>/dev/null < /dev/tty || __in=""
+      printf '%s [回车=(%s)]: ' "$__prompt" "$__d" >&2
     else
-      read -r -p "$__prompt: " __in 2>/dev/null < /dev/tty || __in=""
+      printf '%s: ' "$__prompt" >&2
     fi
+    IFS= read -r __in < /dev/tty || __in=""
   elif [ -n "$__d" ]; then
     log_info "无可用终端，采用默认值: $__prompt = $__d"
   fi
@@ -47,7 +51,9 @@ confirm() {
   if ! _tty_ok; then
     log_info "无可用终端，自动确认: $1（→ $hint）"; return 0
   fi
-  read -r -p "$1 [Y/n] (默认 $hint): " ans 2>/dev/null < /dev/tty || ans=""
+  # 同 _read_input：提示自己 printf 到 stderr，不给 read 加 2>/dev/null（会吞掉提示）
+  printf '%s [Y/n] (默认 %s): ' "$1" "$hint" >&2
+  IFS= read -r ans < /dev/tty || ans=""
   ans="${ans:-$hint}"
   case "$ans" in y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
 }
@@ -66,10 +72,36 @@ ask() {
 
 gen_hex() { openssl rand -hex "$(( $1 / 2 ))" 2>/dev/null || head -c 200 /dev/urandom | od -An -tx1 | tr -d ' \n' | head -c "$1"; }
 
+# _valid_http_url <字符串> → 0=合法 http(s) 地址 / 1=非法
+# 为什么必须有：用户看不到提示时会把整条命令粘进输入框（实机发生过——
+# "中央服务端地址"被写成 `curl -fsSL http://... && bash ...`），
+# 而未校验的字符串会被直接拿去拼 URL，造成测速误判、连接校验误通过、客户端心跳 Invalid URL。
+_valid_http_url() {
+  local u="$1"
+  [ -n "$u" ] || return 1
+  case "$u" in
+    http://*|https://*) ;;
+    *) return 1 ;;
+  esac
+  # 拒绝空白与 shell/URL 危险字符（命令粘贴、变量展开、重定向等一律拦下）
+  case "$u" in
+    *[[:space:]]*) return 1 ;;
+    *[\`\"\'\\]*|*[\;\&\|\<\>]*|*'$'*|*'('*|*')'*|*'{'*|*'}'*) return 1 ;;
+  esac
+  # 必须含 host（http:// 或 https:// 之后不能直接是 / 或空）
+  case "$u" in
+    http:///*|https:///*|http://|https://) return 1 ;;
+  esac
+  return 0
+}
+
 http_ok() {
   # http_ok url [期望码片段] → 0/1
+  # ⚠ 兜底绝不能写成 code="$(curl ... || echo 000)"：curl 失败时 -w 仍会输出 "000"，
+  #   与兜底值拼成 "000\n000" ≠ "000"，校验反而"通过"（实机踩坑）。
+  #   正确做法是把 || 放在命令替换之外。
   local url="$1" code
-  code="$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 4 --max-time 8 "$url" 2>/dev/null || echo 000)"
+  code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 4 --max-time 8 "$url" 2>/dev/null) || code="000"
   [ "$code" != "000" ] && [ "$code" != "502" ] && [ "$code" != "503" ]
 }
 

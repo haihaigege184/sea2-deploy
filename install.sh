@@ -162,6 +162,13 @@ fi
 else
   # 客户端模式：中央服务端地址（内网直连或留空自动从隧道池测速选路）
   ask CENTRAL_SERVER "6/6 中央服务端地址（回车=自动测速：内网优先，公网自动走隧道）" ""
+  # 硬校验：非 URL 内容（典型是误粘了整条命令）绝不能流入配置——否则会被拼进请求 URL，
+  # 导致测速误判 0ms、连接校验误通过、客户端心跳持续 Invalid URL（实机发生过）。
+  if [ -n "$CENTRAL_SERVER" ] && ! _valid_http_url "$CENTRAL_SERVER"; then
+    log_warn "中央服务端地址非法（当前=$CENTRAL_SERVER）→ 已忽略，改为自动测速选路"
+    log_warn "  正确写法示例: http://10.0.0.11:3457  或  https://your-domain.com"
+    CENTRAL_SERVER=""
+  fi
   # 令牌优先从文件读取：明文写在命令行会进 shell history / ps / 部署日志
   if [ -z "${SEA1_ADMIN_TOKEN:-}" ] && [ -n "${SEA1_ADMIN_TOKEN_FILE:-}" ] && [ -r "$SEA1_ADMIN_TOKEN_FILE" ]; then
     SEA1_ADMIN_TOKEN="$(tr -d ' \t\r\n' < "$SEA1_ADMIN_TOKEN_FILE")"
@@ -227,12 +234,23 @@ deploy_payload
 init_runtime_dirs
 
 log_step "渲染配置（占位符 → 本机实际值）"
-[ "$DEPLOY_MODE" = "server" ] && CENTRAL_SERVER="http://127.0.0.1:3457"
+if [ "$DEPLOY_MODE" = "server" ]; then
+  CENTRAL_SERVER="http://127.0.0.1:3457"
+else
+  # 渲染前最后一道门禁：脏地址一旦落进 ops.env，客户端心跳会持续 Invalid URL 且不会自愈
+  _valid_http_url "${CENTRAL_SERVER:-}" || die "中央服务端地址非法，拒绝渲染配置: ${CENTRAL_SERVER:-<空>}"
+fi
 export CENTRAL_SERVER SEA1_ADMIN_TOKEN
 deploy_configs
 verify_no_placeholder "$SEA2_DIR"
 verify_no_placeholder "$SEA1_DIR"
 [ "$DEPLOY_MODE" = "server" ] && verify_no_placeholder "$ACT_DIR"
+# 落盘自检：占位符校验查不出"格式合法但内容是垃圾"的值，这里对落盘的 URL 再做一次格式校验
+if [ "$DEPLOY_MODE" = "client" ]; then
+  _sv="$(grep -m1 '^SEA2_SERVER_URL=' "$SEA2_DIR/napcat/ops.env" 2>/dev/null | cut -d= -f2-)"
+  _valid_http_url "$_sv" || die "配置落盘异常：ops.env 的 SEA2_SERVER_URL 非法（${_sv:-<空>}）"
+  log_ok "配置落盘自检通过（SEA2_SERVER_URL=$_sv）"
+fi
 log_ok "配置渲染完成（无残留占位符）"
 
 npm_install_all

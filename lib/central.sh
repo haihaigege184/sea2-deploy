@@ -26,14 +26,26 @@ select_central_server() {
   fi
 
   local probe=() u pool_json=""
-  [ -n "${CENTRAL_SERVER:-}" ] && probe+=("${CENTRAL_SERVER%/}")
+  # 用户指定的地址先过格式校验：非法（例如误粘整条命令）直接丢弃并回退自动选路
+  if [ -n "${CENTRAL_SERVER:-}" ]; then
+    if _valid_http_url "$CENTRAL_SERVER"; then
+      probe+=("${CENTRAL_SERVER%/}")
+    else
+      log_warn "忽略非法的中央服务端地址: $CENTRAL_SERVER（回退自动测速选路）"
+      CENTRAL_SERVER=""
+    fi
+  fi
   for u in "${SEA2_SEED_SERVERS[@]}"; do probe+=("${u%/}"); done
 
   # ① 拿隧道池（内网不可达时自动走公网隧道，无需人工指定）
+  local raw=""
   for u in "${probe[@]}"; do
     [ -n "$u" ] || continue
-    pool_json=$(curl -fsSL --connect-timeout 4 --max-time 10 "${u}/api/deploy/tunnels" 2>/dev/null || true)
-    if [ -n "$pool_json" ]; then log_info "隧道池来源: $u"; break; fi
+    raw=$(curl -fsSL --connect-timeout 4 --max-time 10 "${u}/api/deploy/tunnels" 2>/dev/null) || raw=""
+    # 必须确认是真的隧道池 JSON，而不是任意字符串（否则会被当成有效池继续用）
+    if [ -n "$raw" ] && printf '%s' "$raw" | jq -e '.tunnels' >/dev/null 2>&1; then
+      pool_json="$raw"; log_info "隧道池来源: $u"; break
+    fi
   done
 
   # ② 扩充候选并去重
@@ -58,25 +70,40 @@ select_central_server() {
   done
 
   # ③ 测速取最快
-  local best="" best_ms=999999 ms
+  # ⚠ 兜底绝不能写成 ms=$(curl ... || echo 999999)：curl 失败时 -w 仍输出 "0.000000"，
+  #   与兜底值拼成 "0.000000999999"，awk 取首字段得 0ms → 不可达地址被误判为"最快"并选中
+  #   （实机踩坑：整条 curl 命令被当成中央地址后，测速显示 0ms 且一举选中）。
+  #   正确做法：先判 curl 退出码，失败直接跳过。
+  local best="" best_ms=999999 ms t
   for u in "${uniq[@]}"; do
-    ms=$(curl -fsSL --connect-timeout 5 --max-time 12 -o /dev/null -w '%{time_total}' "$u/api/shop/info" 2>/dev/null || echo 999999)
-    ms=$(printf '%s' "$ms" | awk '{printf "%d", $1*1000}')
+    t=$(curl -fsSL --connect-timeout 5 --max-time 12 -o /dev/null -w '%{time_total}' "$u/api/shop/info" 2>/dev/null) || t=""
+    if [ -z "$t" ]; then
+      log_info "测速 $u → 不可达，跳过"
+      continue
+    fi
+    ms=$(printf '%s' "$t" | awk '{printf "%d", $1*1000}')
+    case "$ms" in ''|*[!0-9]*) log_info "测速 $u → 响应异常，跳过"; continue ;; esac
     log_info "测速 $u → ${ms}ms"
     if [ "$ms" -lt "$best_ms" ]; then best="$u"; best_ms="$ms"; fi
   done
   if [ -z "$best" ]; then
     die "中央服务端全部候选地址不可达（内网地址与公网隧道均失败）。请检查网络后重跑"
   fi
+  # 最终兜底：只有确定为合法地址才允许写回，防止脏值流入配置渲染
+  _valid_http_url "$best" || die "内部错误：选出的中央服务端地址非法（$best）"
   CENTRAL_SERVER="$best"
   log_ok "选定中央服务端: $CENTRAL_SERVER (${best_ms}ms)"
 }
 
 # verify_central: 连接验证（部署硬门禁）
+# 不只判 HTTP 可达，还要确认真是激活服务（接口返回 ok=true），避免脏地址/错误站点被判"连通"
 verify_central() {
   log_step "验证中央服务端连接"
-  if ! http_ok "${CENTRAL_SERVER%/}/api/shop/info"; then
-    die "中央服务端不可达: $CENTRAL_SERVER（客户端模式必须先连通服务端）"
+  _valid_http_url "${CENTRAL_SERVER:-}" || die "中央服务端地址非法: ${CENTRAL_SERVER:-<空>}"
+  local resp
+  resp=$(curl -fsSL --connect-timeout 6 --max-time 15 "${CENTRAL_SERVER%/}/api/shop/info" 2>/dev/null) || resp=""
+  if ! printf '%s' "$resp" | jq -e '.ok == true' >/dev/null 2>&1; then
+    die "中央服务端校验失败: $CENTRAL_SERVER（期望 /api/shop/info 返回 {\"ok\":true}，实际: ${resp:0:120}）"
   fi
   log_ok "中央服务端连通: $CENTRAL_SERVER"
 }
@@ -92,8 +119,9 @@ activate_device_trial() {
   fi
   [ -n "$mid" ] || die "machine_id 派生失败"
   echo "$mid" > /tmp/.sea2-machine-id
+  _valid_http_url "${CENTRAL_SERVER:-}" || die "中央服务端地址非法: ${CENTRAL_SERVER:-<空>}"
   resp=$(curl -fsSL --connect-timeout 8 --max-time 20 -X POST -H 'Content-Type: application/json' \
-    -d "{\"machine_id\": \"$mid\"}" "${CENTRAL_SERVER%/}/api/trial/status" 2>/dev/null || true)
+    -d "{\"machine_id\": \"$mid\"}" "${CENTRAL_SERVER%/}/api/trial/status" 2>/dev/null) || resp=""
   if printf '%s' "$resp" | jq -e '.ok == true' >/dev/null 2>&1; then
     days=$(printf '%s' "$resp" | jq -r '(.remaining_ms // 0) / 86400000 | floor' 2>/dev/null || echo '?')
     log_ok "设备已在中央服务端注册（machine_id=${mid:0:12}…），试用已激活"

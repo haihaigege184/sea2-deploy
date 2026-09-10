@@ -8,3 +8,5 @@ _rendertest/
 _rendertest_work/
 _dbg_*
 _release/
+# 本地临时补丁脚本（形如 _fix_*.py / _patch_*.py），不入库
+_*.py
