@@ -138,6 +138,11 @@ fi
 WITH_BACKUP=1
 
 ask ADMIN_QQ     "3/6 管理员 QQ（回车=同主号；留空则稍后在机器人对话里自助激活绑定）" "$MAIN_QQ"
+# 与主/副号同等校验：该值会经 __ADMIN_QQ__ 注入 config.json 的 superAdmin/developer，
+# 含引号或空格会产出非法 JSON（占位符校验查不出），bot 启动即解析失败。
+if [ -n "$ADMIN_QQ" ]; then
+  [[ "$ADMIN_QQ" =~ ^[0-9]{5,12}$ ]] || die "管理员 QQ 格式非法（当前=$ADMIN_QQ）。留空请直接回车（稍后在机器人对话里自助激活绑定）。"
+fi
 
 ask NOTIFY_GROUPS "4/6 通知群号（逗号分隔，如 123456,234567；回车=空）" ""
 NOTIFY_GROUPS_JSON="[]"
@@ -149,6 +154,11 @@ DEMO_MODE_JSON="{}"
 [ -n "$PRINT_GROUP" ] && DEMO_MODE_JSON="{\"${PRINT_GROUP}\": true}"
 
 ask PRINTER_DEFAULT "5/6 默认打印机（CUPS 队列名，回车=HP_LaserJet_P2015_Series）" "HP_LaserJet_P2015_Series"
+# CUPS 队列名合法字符：[A-Za-z0-9._-]。含引号会让 PRINTERS_JSON / config.json 变成非法 JSON。
+if [ -n "$PRINTER_DEFAULT" ] && ! printf '%s' "$PRINTER_DEFAULT" | grep -qE '^[A-Za-z0-9._-]+$'; then
+  log_warn "打印机队列名含非法字符（当前=$PRINTER_DEFAULT）→ 回退默认 HP_LaserJet_P2015_Series"
+  PRINTER_DEFAULT="HP_LaserJet_P2015_Series"
+fi
 PRINTERS_JSON="[\"$PRINTER_DEFAULT\"]"
 
 if [ "$DEPLOY_MODE" = "server" ]; then
@@ -245,6 +255,15 @@ deploy_configs
 verify_no_placeholder "$SEA2_DIR"
 verify_no_placeholder "$SEA1_DIR"
 [ "$DEPLOY_MODE" = "server" ] && verify_no_placeholder "$ACT_DIR"
+# JSON 合法性自检：占位符"无残留"不等于 JSON 合法 —— 向导输入含引号等字符会把结构破坏，
+# 不在这里拦住就会一路装完、直到 bot 启动才解析失败（render.sh 只转义 & | \，不处理 "）。
+if command -v jq >/dev/null 2>&1; then
+  for _jf in "$SEA2_DIR/config.json" "$SEA1_DIR/config.json"; do
+    [ -f "$_jf" ] || continue
+    jq empty "$_jf" 2>/dev/null || die "配置 JSON 非法，中止：$_jf（多半是向导输入含引号/特殊字符）"
+  done
+  log_ok "配置 JSON 自检通过（sea2/sea1 config.json）"
+fi
 # 落盘自检：占位符校验查不出"格式合法但内容是垃圾"的值，这里对落盘的 URL 再做一次格式校验
 if [ "$DEPLOY_MODE" = "client" ]; then
   _sv="$(grep -m1 '^SEA2_SERVER_URL=' "$SEA2_DIR/napcat/ops.env" 2>/dev/null | cut -d= -f2-)"
