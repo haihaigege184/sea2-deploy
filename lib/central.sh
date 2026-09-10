@@ -3,37 +3,70 @@
 # lib/central.sh — 客户端模式：中央服务端选路 / 连接验证 / 设备试用激活
 # ==========================================================================
 
-# select_central_server: 从候选地址中测速选最快可达者
-#   候选 = 用户输入内网地址(直接优先测) + 服务端 /api/deploy/tunnels 池
+# 公网/内网自适应种子（隧道域名属公开信息，可随仓库分发；顺序无关，全部参与测速）
+# 内网机器会自然命中 10.0.0.11（延迟最低），公网机器命中隧道，无需人工区分。
+SEA2_SEED_SERVERS=(
+  "http://10.0.0.11:3457"
+  "http://sea1.xsian.top"
+  "http://sea2.hk1.sian.one"
+  "http://sea3.gost.cloudns.ch"
+  "http://sea4.gost.nyc.mn"
+  "http://sea1bot888.locvps.sian.one"
+)
+
+# select_central_server: 测速选最快可达者（公网/内网自适应）
+#   ① 探测种子（用户指定 → 内网 → 公网隧道），任一个可达即拿到服务端维护的完整隧道池
+#   ② 候选 = 池内公网地址 + masterAddress + 全部种子（去重）
+#   ③ 逐个测速取最快；全不可达才报错
 #   输出: CENTRAL_SERVER（全局）
 select_central_server() {
-  local candidates=()
-  [ -n "$CENTRAL_SERVER" ] && candidates+=("$CENTRAL_SERVER")
-  # 服务端模式兜底：本机
   if [ "${DEPLOY_MODE:-server}" = "server" ]; then
     CENTRAL_SERVER="http://127.0.0.1:3457"
     return 0
   fi
-  # 从隧道池拉候选（公开端点，免 token；masterAddress 也可作候选）
-  local pool_json pool
-  pool_json=$(curl -fsSL --connect-timeout 8 --max-time 20 "${CENTRAL_SERVER%/}/api/deploy/tunnels" 2>/dev/null || true)
+
+  local probe=() u pool_json=""
+  [ -n "${CENTRAL_SERVER:-}" ] && probe+=("${CENTRAL_SERVER%/}")
+  for u in "${SEA2_SEED_SERVERS[@]}"; do probe+=("${u%/}"); done
+
+  # ① 拿隧道池（内网不可达时自动走公网隧道，无需人工指定）
+  for u in "${probe[@]}"; do
+    [ -n "$u" ] || continue
+    pool_json=$(curl -fsSL --connect-timeout 4 --max-time 10 "${u}/api/deploy/tunnels" 2>/dev/null || true)
+    if [ -n "$pool_json" ]; then log_info "隧道池来源: $u"; break; fi
+  done
+
+  # ② 扩充候选并去重
+  local candidates=()
   if [ -n "$pool_json" ]; then
-    while IFS= read -r pool; do
-      [ -n "$pool" ] && candidates+=("$pool")
+    while IFS= read -r u; do
+      [ -n "$u" ] && candidates+=("${u%/}")
     done < <(printf '%s' "$pool_json" | jq -r '.tunnels[]?.publicAddr, .masterAddress? // empty' 2>/dev/null | grep -v '^$' | sort -u)
+  else
+    log_warn "隧道池接口不可达，改用内置种子地址"
   fi
-  # 测速：GET /api/shop/info 计时，取最快成功者
-  local best="" best_ms=999999 u ms
+  for u in "${probe[@]}"; do [ -n "$u" ] && candidates+=("$u"); done
+
+  # 注意：必须分开声明 —— `local -A seen=() uniq=()` 会把 uniq 也声明成关联数组，
+  # 导致后续 for 遍历拿到空串（实机验证抓到：日志全是 "测速  → 0ms"）
+  local -A seen=()
+  local uniq=()
   for u in "${candidates[@]}"; do
     [ -n "$u" ] || continue
-    u="${u%/}"
+    [ -n "${seen[$u]:-}" ] && continue
+    seen[$u]=1; uniq+=("$u")
+  done
+
+  # ③ 测速取最快
+  local best="" best_ms=999999 ms
+  for u in "${uniq[@]}"; do
     ms=$(curl -fsSL --connect-timeout 5 --max-time 12 -o /dev/null -w '%{time_total}' "$u/api/shop/info" 2>/dev/null || echo 999999)
     ms=$(printf '%s' "$ms" | awk '{printf "%d", $1*1000}')
     log_info "测速 $u → ${ms}ms"
     if [ "$ms" -lt "$best_ms" ]; then best="$u"; best_ms="$ms"; fi
   done
   if [ -z "$best" ]; then
-    die "中央服务端全部候选地址不可达（内网地址与隧道池均失败）。请检查网络或主地址后重跑"
+    die "中央服务端全部候选地址不可达（内网地址与公网隧道均失败）。请检查网络后重跑"
   fi
   CENTRAL_SERVER="$best"
   log_ok "选定中央服务端: $CENTRAL_SERVER (${best_ms}ms)"

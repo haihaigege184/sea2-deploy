@@ -2,10 +2,16 @@
 # ==========================================================================
 # bootstrap.sh — SEA2 一键部署引导器（网络拉取版）
 #
-# 用法（新机器上无需预下载任何文件，一行命令）：
-#   curl -fsSL https://raw.githubusercontent.com/<USER>/sea2-deploy/main/bootstrap.sh | bash
-#   或: wget -qO- <同上URL> | bash
-#   或先下载再执行: bash bootstrap.sh [--mirror ghfast|direct] [--ref main]
+# 用法（推荐先落盘再执行：这样向导能正常交互，也能重复运行/看参数）：
+#   curl -fsSL http://sea1.xsian.top/downloads/bootstrap.sh -o /tmp/sea2.sh && bash /tmp/sea2.sh
+#   （隧道域名不可用时兜底 GitHub）
+#   curl -fsSL https://raw.githubusercontent.com/haihaigege184/sea2-deploy/main/bootstrap.sh -o /tmp/sea2.sh && bash /tmp/sea2.sh
+#
+# 也可以管道执行（向导会自动从 /dev/tty 读输入，不会读管道）：
+#   curl -fsSL http://sea1.xsian.top/downloads/bootstrap.sh | bash
+#
+# 分发节点自动选路：对全部隧道域名 + 内网地址测速，取最快者下载大文件，
+# 内网机器自然命中 10.0.0.11，公网机器命中隧道，无需人工区分。
 #
 # 流程：检测架构/系统 → 多源回退下载仓库 tarball → 解压到 /root/sea2-deploy
 #       → 校验 → 交给 install.sh（智能交互：新装机向导 / 已装维护菜单）
@@ -33,7 +39,9 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --mirror) FORCE_MIRROR="$2"; shift 2 ;;
     --ref)    REPO_REF="$2"; shift 2 ;;
-    *) warn "未知参数: $1（忽略）"; shift ;;
+    # 未识别参数不在此消费：原样保留在 INSTALL_ARGS 中透传给 install.sh
+    # （如 --dry-run / --yes），此处静默跳过即可
+    *) shift ;;
   esac
 done
 
@@ -53,10 +61,35 @@ fetch() { # fetch <url> <dest>
 # ---- 多源回退下载仓库 tarball ----
 DEST="/root/sea2-deploy.tar.gz"
 SOURCES=()
+
+# 运维中心分发节点（公网隧道 + 内网直连）：全部公开，全国可用
+SEA2_NODES="http://sea1.xsian.top http://sea2.hk1.sian.one http://sea3.gost.cloudns.ch http://sea4.gost.nyc.mn http://sea1bot888.locvps.sian.one http://10.0.0.11:3457"
+BEST_NODE=""; BEST_MS=999999
+pick_fastest() { # 测速选最快可达节点（内网不可达自动走隧道）
+  local u ms
+  for u in $SEA2_NODES; do
+    ms=$(curl -s -o /dev/null -w '%{time_total}' --connect-timeout 4 --max-time 8 "$u/api/shop/info" 2>/dev/null || echo 999)
+    ms=$(printf '%s' "$ms" | awk '{printf "%d", $1*1000}')
+    log "测速 $u → ${ms}ms"
+    if [ "$ms" -lt "$BEST_MS" ]; then BEST_NODE="$u"; BEST_MS="$ms"; fi
+  done
+  [ -n "$BEST_NODE" ] && [ "$BEST_MS" -lt 900000 ]
+}
+
 # 服务端分发优先（可选）：运维中心 /downloads/sea2-deploy.tar.gz，内网/隧道可达时最快最稳
 [ -n "${SEA2_TARBALL_URL:-}" ] && SOURCES+=("$SEA2_TARBALL_URL")
 
+if [ "${FORCE_MIRROR:-}" != "github" ] && pick_fastest; then
+  ok "最快分发节点: $BEST_NODE（${BEST_MS}ms）"
+  SOURCES+=("$BEST_NODE/downloads/sea2-deploy.tar.gz")
+  # 其余节点作同轮兜底（不重复测速，仅换源重试）
+  for u in $SEA2_NODES; do
+    [ "$u" != "$BEST_NODE" ] && SOURCES+=("$u/downloads/sea2-deploy.tar.gz")
+  done
+fi
+
 case "$FORCE_MIRROR" in
+  github)  SOURCES+=("${GITHUB_TARBALL}" "${PROXY_PREFIX}${GITHUB_TARBALL}") ;;
   ghfast)  SOURCES+=("${PROXY_PREFIX}${GITHUB_TARBALL}") ;;
   direct)  SOURCES+=("${GITHUB_TARBALL}") ;;
   *)       SOURCES+=("${GITHUB_TARBALL}" "${PROXY_PREFIX}${GITHUB_TARBALL}") ;;

@@ -57,16 +57,25 @@ sea2-deploy/
 
 ## 远程一键部署（全新机器，推荐）
 
-```bash
-# root 直连（环境变量必须写在管道右侧的 bash 上，否则只作用于 curl）
-curl -fsSL http://10.0.0.11:3457/downloads/bootstrap.sh \
-  | SEA2_TARBALL_URL=http://10.0.0.11:3457/downloads/sea2-deploy.tar.gz \
-    bash
+公开分发、全国可用（**推荐先落盘再执行**：向导能正常交互，也可重复运行/加参数）：
 
-# 非 root
-export SEA2_TARBALL_URL=http://10.0.0.11:3457/downloads/sea2-deploy.tar.gz
-curl -fsSL http://10.0.0.11:3457/downloads/bootstrap.sh | sudo -E bash
+```bash
+curl -fsSL http://sea1.xsian.top/downloads/bootstrap.sh -o /tmp/sea2.sh \
+  || curl -fsSL https://raw.githubusercontent.com/haihaigege184/sea2-deploy/main/bootstrap.sh -o /tmp/sea2.sh
+bash /tmp/sea2.sh
 ```
+
+也可以管道执行（向导会从 `/dev/tty` 读输入，不会去读管道）：
+
+```bash
+curl -fsSL http://sea1.xsian.top/downloads/bootstrap.sh | bash
+```
+
+**地址自动选路，无需人工区分内网/公网**：脚本内置全部隧道域名 + 内网地址，逐个测速取最快者——
+内网机器自然命中 `10.0.0.11:3457`（延迟最低），公网机器命中隧道，全挂才回退 GitHub。
+中央服务端地址同样自动测速：先探测任一可达节点拉取 `/api/deploy/tunnels` 完整隧道池，再全池测速。
+
+仓库包与大文件（linuxqq deb / NapCat.Shell.zip）走**服务端分发**（`/downloads/*`），腾讯 CDN 兜底。
 
 > **命令里不要带令牌。** `SEA1_ADMIN_TOKEN` 是运维中心超管令牌，明文写进命令行会留在
 > `~/.bash_history`、`ps` 输出和部署日志里，且任何拿到它的人都能签发/换绑授权码。

@@ -14,13 +14,33 @@ log_step() { printf '\n%b== %s ==%b\n'   "$C_STEP" "$*"      "$C_OFF"; }
 
 die() { log_err "$*"; exit 1; }
 
+# _read_input <提示> <默认值> → 结果写入 $REPLY
+# 关键点：`curl ... | bash` 时 stdin 是管道，read 会立刻 EOF（还会吃掉脚本后续字节），
+# 所以一律从 /dev/tty 读；确实没有可用终端（CI/后台）时才回落默认值。
+_read_input() {
+  local __prompt="$1" __d="$2" __in=""
+  if [ -c /dev/tty ] && [ -r /dev/tty ]; then
+    if [ -n "$__d" ]; then
+      read -r -p "$__prompt [回车=($__d)]: " __in < /dev/tty 2>/dev/null || __in=""
+    else
+      read -r -p "$__prompt: " __in < /dev/tty 2>/dev/null || __in=""
+    fi
+  elif [ -n "$__d" ]; then
+    log_info "无可用终端，采用默认值: $__prompt = $__d"
+  fi
+  REPLY="${__in:-$__d}"
+}
+
 confirm() {
   # confirm 提示文字 [默认y|n]
   local hint="${2:-y}" ans
-  if [ "${DEPLOY_YES:-0}" = "1" ] || [ ! -t 0 ]; then
+  if [ "${DEPLOY_YES:-0}" = "1" ]; then
     log_info "自动确认: $1（→ $hint）"; return 0
   fi
-  read -r -p "$1 [Y/n] (默认 $hint): " ans || ans=""
+  if [ ! -c /dev/tty ] || [ ! -r /dev/tty ]; then
+    log_info "无可用终端，自动确认: $1（→ $hint）"; return 0
+  fi
+  read -r -p "$1 [Y/n] (默认 $hint): " ans < /dev/tty 2>/dev/null || ans=""
   ans="${ans:-$hint}"
   case "$ans" in y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
 }
@@ -33,13 +53,8 @@ ask() {
     log_info "采用预设 $1=${!__var}"
     return 0
   fi
-  if [ -n "$__default" ]; then
-    read -r -p "$__prompt [回车=($__default)]: " __in || __in=""
-  else
-    read -r -p "$__prompt: " __in || __in=""
-  fi
-  __in="${__in:-$__default}"
-  printf -v "$__var" '%s' "$__in"
+  _read_input "$__prompt" "$__default"
+  printf -v "$__var" '%s' "$REPLY"
 }
 
 gen_hex() { openssl rand -hex "$(( $1 / 2 ))" 2>/dev/null || head -c 200 /dev/urandom | od -An -tx1 | tr -d ' \n' | head -c "$1"; }

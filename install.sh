@@ -115,10 +115,14 @@ else
 fi
 
 ask MAIN_QQ      "1/6 主号 QQ（主系统 sea2-bot，原生 NapCat :4000 登录的号）" ""
-[[ "$MAIN_QQ" =~ ^[0-9]{5,12}$ ]] || die "主号 QQ 非法"
+[[ "$MAIN_QQ" =~ ^[0-9]{5,12}$ ]] || die "主号 QQ 非法（当前="${MAIN_QQ:-<空>}"）。
+  无终端/非交互环境请预设环境变量后重跑：MAIN_QQ=123456 bash install.sh
+  （管道执行 `curl|bash` 时向导读不到输入，建议先下载再执行：bash bootstrap.sh）"
 
 ask BACKUP_QQ    "2/6 副号 QQ（副系统原生 NapCat 双实例 :3000 登录的号，必须与主号不同）" ""
-[[ "$BACKUP_QQ" =~ ^[0-9]{5,12}$ ]] || die "副号 QQ 非法"
+[[ "$BACKUP_QQ" =~ ^[0-9]{5,12}$ ]] || die "副号 QQ 非法（当前="${BACKUP_QQ:-<空>}"）。
+  无终端/非交互环境请预设环境变量后重跑：BACKUP_QQ=123456 bash install.sh
+  （管道执行 `curl|bash` 时向导读不到输入，建议先下载再执行：bash bootstrap.sh）"
 [ "$MAIN_QQ" != "$BACKUP_QQ" ] || die "主副号必须不同（共号会互踢）"
 WITH_BACKUP=1
 
@@ -146,7 +150,7 @@ else
 fi
 else
   # 客户端模式：中央服务端地址（内网直连或留空自动从隧道池测速选路）
-  ask CENTRAL_SERVER "6/6 中央服务端地址（内网如 http://10.0.0.11:3457；回车=自动测速隧道池）" "http://10.0.0.11:3457"
+  ask CENTRAL_SERVER "6/6 中央服务端地址（回车=自动测速：内网优先，公网自动走隧道）" ""
   # 令牌优先从文件读取：明文写在命令行会进 shell history / ps / 部署日志
   if [ -z "${SEA1_ADMIN_TOKEN:-}" ] && [ -n "${SEA1_ADMIN_TOKEN_FILE:-}" ] && [ -r "$SEA1_ADMIN_TOKEN_FILE" ]; then
     SEA1_ADMIN_TOKEN="$(tr -d ' \t\r\n' < "$SEA1_ADMIN_TOKEN_FILE")"
