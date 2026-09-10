@@ -61,14 +61,31 @@ sea2-deploy/
 # root 直连（环境变量必须写在管道右侧的 bash 上，否则只作用于 curl）
 curl -fsSL http://10.0.0.11:3457/downloads/bootstrap.sh \
   | SEA2_TARBALL_URL=http://10.0.0.11:3457/downloads/sea2-deploy.tar.gz \
-    SEA1_ADMIN_TOKEN=<运维中心 ADMIN_TOKEN> \
     bash
 
 # 非 root
 export SEA2_TARBALL_URL=http://10.0.0.11:3457/downloads/sea2-deploy.tar.gz
-export SEA1_ADMIN_TOKEN=<运维中心 ADMIN_TOKEN>
 curl -fsSL http://10.0.0.11:3457/downloads/bootstrap.sh | sudo -E bash
 ```
+
+> **命令里不要带令牌。** `SEA1_ADMIN_TOKEN` 是运维中心超管令牌，明文写进命令行会留在
+> `~/.bash_history`、`ps` 输出和部署日志里，且任何拿到它的人都能签发/换绑授权码。
+> 不带也能装完（设备以"试用 14 天"入集群），需要正式授权时用下面任一种方式：
+>
+> ```bash
+> # 方式一（推荐）：部署时传文件，令牌不进命令行
+> echo '<TOKEN>' > /root/.sea2-admin-token && chmod 600 /root/.sea2-admin-token
+> curl -fsSL http://10.0.0.11:3457/downloads/bootstrap.sh \
+>   | SEA2_TARBALL_URL=http://10.0.0.11:3457/downloads/sea2-deploy.tar.gz \
+>     SEA1_ADMIN_TOKEN_FILE=/root/.sea2-admin-token bash
+>
+> # 方式二：装完再补，免重装（client-agent 每 30 分钟自动重试领码）
+> echo '<TOKEN>' > /etc/sea1-x86/admin-token && chmod 600 /etc/sea1-x86/admin-token
+> pm2 restart sea1-client
+>
+> # 方式三：在运维中心手工签发激活码后写入（完全不需要令牌）
+> echo 'SEA1-XXXX-XXXX-XXXX' > /etc/sea1-x86/client-code && pm2 restart sea1-client
+> ```
 
 仓库包与大文件（linuxqq deb / NapCat.Shell.zip）统一走**服务端分发**：内网直连 `10.0.0.11:3457/downloads/*`，
 内网不可达时自动测速选隧道，隧道全挂才回退腾讯 CDN —— 不再依赖 GitHub（龟速）。
@@ -80,7 +97,8 @@ curl -fsSL http://10.0.0.11:3457/downloads/bootstrap.sh | sudo -E bash
 | `SEA2_TARBALL_URL` | 空 | 仓库包地址；建议指向中央服务端 `/downloads/sea2-deploy.tar.gz`（内网秒下）。留空走 GitHub |
 | `DEPLOY_MODE` | `2`（客户端） | `1` = 服务端全套（含本机激活服务 :3457），`2` = 客户端接入中央 |
 | `CENTRAL_SERVER` | `http://10.0.0.11:3457` | 中央地址；置空则自动从隧道池测速选最快 |
-| `SEA1_ADMIN_TOKEN` | 空 | 运维中心令牌。**留空也能装完**：设备以「设备维度试用（14 天）」身份出现在集群页，后续在控制台签发授权码写入 `/etc/sea1-x86/client-code` 并 `pm2 restart sea1-client` 即可转正（client-agent 每 30 分钟也会自动重试领码） |
+| `SEA1_ADMIN_TOKEN` | 空 | 运维中心超管令牌。**不建议写在命令行**（会进 history/ps/日志），优先用下面的文件方式 |
+| `SEA1_ADMIN_TOKEN_FILE` | 空 | 从文件读取 `SEA1_ADMIN_TOKEN`（`chmod 600`）。装完后 client-agent 也支持 `/etc/sea1-x86/admin-token` 免重装补给 |
 | `SEA2_RESET_MACHINE_ID` | `0` | `1` = 强制清除 `/etc/sea1-x86/{machine-id,client-code}`，按**全新设备**重新注册。默认保留（重装不换身份，避免授权漂移），只有要模拟真·全新环境时才置 1 |
 | `MAIN_QQ` / `BACKUP_QQ` / `ADMIN_QQ` / `NOTIFY_GROUPS` | — | 向导其余项，预设即跳过提问 |
 | `SEA2_FLEET_CUSTOMER` | 空 | 客户端模式自动领码所用的**客户号**。默认按机器唯一（`x86-<machine_id 前16位>`）。**不要多台机器设成同一个值**（见下） |

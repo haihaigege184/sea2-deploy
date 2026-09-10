@@ -19,7 +19,17 @@ const fs = require('fs');
 const http = require('http');
 
 const SERVER = process.env.SEA1_ACTIVATION_URL || 'http://127.0.0.1:3457';
-const ADMIN_TOKEN = process.env.SEA1_ADMIN_TOKEN || '';
+const ADMIN_TOKEN_FILE = '/etc/sea1-x86/admin-token';
+function loadAdminToken() {
+  const envTok = (process.env.SEA1_ADMIN_TOKEN || '').trim();
+  if (envTok) return envTok;
+  // 免重装补给：运维把令牌写进文件即可（chmod 600），无需把明文塞进 pm2 env / 命令行
+  try {
+    if (fs.existsSync(ADMIN_TOKEN_FILE)) return fs.readFileSync(ADMIN_TOKEN_FILE, 'utf8').trim();
+  } catch (e) { /* 读取失败按无令牌处理 */ }
+  return '';
+}
+const ADMIN_TOKEN = loadAdminToken();
 // [2026-08-08 FIX] 专用机器码文件：/etc/sea1-x86/machine-id（内容为激活绑定的 64 位机器码，直接使用；
 // 兼容旧版 UUID 内容 → HMAC 派生）。回退读取 /etc/sea1/machine-id（bot 持久化 UUID → HMAC 派生）。
 // 绝不写入 /etc/sea1/machine-id：那是 sea1 bot 自身的授权机器码，改写会导致 bot 授权失配。

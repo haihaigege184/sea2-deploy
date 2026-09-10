@@ -147,11 +147,17 @@ fi
 else
   # 客户端模式：中央服务端地址（内网直连或留空自动从隧道池测速选路）
   ask CENTRAL_SERVER "6/6 中央服务端地址（内网如 http://10.0.0.11:3457；回车=自动测速隧道池）" "http://10.0.0.11:3457"
+  # 令牌优先从文件读取：明文写在命令行会进 shell history / ps / 部署日志
+  if [ -z "${SEA1_ADMIN_TOKEN:-}" ] && [ -n "${SEA1_ADMIN_TOKEN_FILE:-}" ] && [ -r "$SEA1_ADMIN_TOKEN_FILE" ]; then
+    SEA1_ADMIN_TOKEN="$(tr -d ' \t\r\n' < "$SEA1_ADMIN_TOKEN_FILE")"
+    log_info "已从 SEA1_ADMIN_TOKEN_FILE 读取 ADMIN_TOKEN（长度 ${#SEA1_ADMIN_TOKEN}）"
+  fi
   ask SEA1_ADMIN_TOKEN "    运维中心 ADMIN_TOKEN（可选，用于自动领取 client-code；回车=跳过）" ""
   if [ -z "$SEA1_ADMIN_TOKEN" ]; then
     log_warn "未提供 ADMIN_TOKEN：本机将以「设备维度试用（默认 14 天）」身份出现在运维中心集群页。"
     log_warn "转正式授权方式：运维中心签发后把激活码写入 /etc/sea1-x86/client-code 并 pm2 restart sea1-client；"
-    log_warn "              或带 SEA1_ADMIN_TOKEN=xxx 重跑本脚本（client-agent 每 30 分钟也会自动重试领码）。"
+    log_warn "              或免重装补给：把令牌写入 /etc/sea1-x86/admin-token（chmod 600）后 pm2 restart sea1-client；"
+    log_warn "              重跑本脚本时请用 SEA1_ADMIN_TOKEN_FILE=/path/to/token 传文件，不要把令牌明文写在命令行。"
   fi
   DEPLOY_ACTIVATION="n"
 fi
