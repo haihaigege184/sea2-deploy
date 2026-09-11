@@ -93,6 +93,12 @@
   .prn .msg{font-size:12px;margin-top:8px;padding:7px 10px;border-radius:8px;display:none}
   .prn .msg.ok{display:block;background:rgba(54,210,160,.12);color:var(--ok)}
   .prn .msg.err{display:block;background:rgba(255,107,107,.12);color:var(--err)}
+  .prn .rawline{font-size:11.5px;color:var(--mut);margin:0 0 10px;line-height:1.7;word-break:break-all}
+  .prn .rawline code{color:var(--txt);background:var(--card2);padding:1px 6px;border-radius:6px;font-size:11px}
+  .prn .rawline .src{margin-left:8px;opacity:.75}
+  .prn .matchhint{font-size:11.5px;color:var(--mut);margin-top:8px;line-height:1.7;word-break:break-all}
+  .prn .matchhint code{color:var(--acc);background:var(--card2);padding:1px 6px;border-radius:6px;font-size:11px}
+  .prn .weakwarn{color:var(--warn)}
   .empty{font-size:12.5px;color:var(--mut);text-align:center;padding:18px;border:1px dashed var(--line);border-radius:12px}
   .fixed{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
   .fixed img{width:130px;height:130px;background:#fff;border-radius:12px;padding:6px}
@@ -644,20 +650,34 @@ function renderPrinters(){
     html += '</div>';
   }
   if(prnData.discovered && prnData.discovered.length){
-    html += '<div style="font-size:12px;color:var(--mut);margin:14px 0 8px">发现未配置设备：</div>';
+    html += '<div style="font-size:12px;color:var(--mut);margin:14px 0 8px">发现未配置设备（品牌/型号可直接修改，改完自动重新匹配驱动）：</div>';
     html += '<div class="prn-list">';
     prnData.discovered.forEach((d,i)=>{
-      const opts = (d.drivers||[]).map((x,j)=>`<option value="${esc(x.driver)}" ${j===0?'selected':''}>${esc(x.desc)}</option>`).join('');
+      const mk = d.make || '';
+      const md = d.model || '';
+      const opts = (d.drivers||[]).map((x,j)=>`<option value="${esc(x.driver)}" ${j===0?'selected':''}>${esc(x.desc)}  [${x.score}]</option>`).join('');
+      const srcTip = { 'device-id':'读取自打印机硬件信息','lpinfo':'读取自 CUPS','uri':'由接口地址推断（建议核对）' }[d.model_source] || '';
       html += `<div class="prn" data-i="${i}">
-        <div class="top"><span class="nm">${esc(d.info||d.uri)}</span><span class="tag new">新设备 · ${esc(d.backend)}</span></div>
+        <div class="top"><span class="nm">${esc((mk+' '+md).trim() || d.uri)}</span><span class="tag new">新设备 · ${esc(d.backend)}</span>${d.model_source==='uri'?'<span class="tag warn">型号为推断值</span>':''}</div>
+        <div class="rawline">原始标识：<code>${esc(d.model_raw||d.uri)}</code>${srcTip?'<span class="src">'+esc(srcTip)+'</span>':''}</div>
         <div class="row">
-          <label class="fld">驱动(已按匹配度排序)
-            <select class="drv">${opts || '<option>无匹配驱动</option>'}</select>
+          <label class="fld">品牌
+            <input type="text" class="mk" value="${esc(mk)}" placeholder="如：HP" oninput="debounceMatch(${i})" />
+          </label>
+          <label class="fld">型号（不含前缀后缀）
+            <input type="text" class="md" value="${esc(md)}" placeholder="如：LaserJet P2015 Series" oninput="debounceMatch(${i})" />
+          </label>
+          <button class="btn ghost" onclick="rematchDrivers(${i})">重新匹配驱动</button>
+        </div>
+        <div class="row">
+          <label class="fld">驱动（按匹配度排序，[ ] 内为匹配分）
+            <select class="drv">${opts || '<option value="">无匹配驱动 —— 请修正品牌/型号后重试</option>'}</select>
           </label>
           <label class="fld">位置/备注
             <input type="text" class="loc" placeholder="如：前台" />
           </label>
         </div>
+        <div class="matchhint" id="mh${i}">当前用于匹配：<code>${esc(d.match_query||md||d.uri)}</code></div>
         <div class="row">
           <span class="chk"><input type="checkbox" class="def" checked/> 设为默认打印机</span>
           <span class="chk"><input type="checkbox" class="a4" checked/> 默认 A4</span>
@@ -671,16 +691,51 @@ function renderPrinters(){
   if(!html) html = '<div class="empty">未识别到新设备。已配置的打印机见上方。可重新识别或确认 USB/网络打印机已连接。</div>';
   area.innerHTML = html;
 }
+// [PRINTER-MODEL-3] 改品牌/型号 → 重新匹配驱动
+const _matchTimers = {};
+function debounceMatch(i){
+  clearTimeout(_matchTimers[i]);
+  _matchTimers[i] = setTimeout(()=>rematchDrivers(i), 450);
+}
+async function rematchDrivers(i){
+  const card = document.querySelector(`.prn[data-i="${i}"]`);
+  if(!card) return;
+  const mk = (card.querySelector('.mk').value || '').trim();
+  const md = (card.querySelector('.md').value || '').trim();
+  const q = (mk + ' ' + md).trim();
+  const sel = card.querySelector('.drv');
+  const mh = $('#mh'+i);
+  if(mh) mh.innerHTML = '匹配中…';
+  try{
+    const r = await fetch('/api/drivers?q=' + encodeURIComponent(q));
+    const j = await r.json();
+    const list = j.matches || [];
+    if(list.length){
+      sel.innerHTML = list.map((x,k)=>`<option value="${esc(x.driver)}" ${k===0?'selected':''}>${esc(x.desc)}  [${x.score}]</option>`).join('');
+      const top = list[0].score || 0;
+      if(mh) mh.innerHTML = '当前用于匹配：<code>'+esc(j.cleaned||q)+'</code> · 最佳匹配分 '+top+(top>=60?'':' <span class="weakwarn">（匹配度偏低，请核对品牌/型号）</span>');
+    }else{
+      sel.innerHTML = '<option value="">无匹配驱动 —— 请修正品牌/型号后重试</option>';
+      if(mh) mh.innerHTML = '当前用于匹配：<code>'+esc(j.cleaned||q)+'</code> · <span class="weakwarn">未找到任何驱动</span>';
+    }
+  }catch(e){
+    if(mh) mh.textContent = '匹配失败：'+e;
+  }
+}
 async function addPrinter(i){
   const d = prnData.discovered[i];
   const card = document.querySelector(`.prn[data-i="${i}"]`);
-  const driver = card.querySelector('.drv').value;
+  const mk = (card.querySelector('.mk').value || '').trim();
+  const md = (card.querySelector('.md').value || '').trim();
+  const driver = (card.querySelector('.drv').value || '').trim();
   const loc = card.querySelector('.loc').value;
   const def = card.querySelector('.def').checked;
   const a4 = card.querySelector('.a4').checked;
   const msg = card.querySelector('.msg');
   msg.className='msg'; msg.textContent='';
-  const name = (d.info||d.uri).replace(/[^A-Za-z0-9]/g,'').slice(0,24) || ('Printer'+i);
+  if(!driver){ msg.className='msg err'; msg.textContent='✗ 请先选择驱动（可点「重新匹配驱动」）'; return; }
+  const base = (md || mk || d.model || d.info || d.uri).replace(/[^A-Za-z0-9]/g,'');
+  const name = base.slice(0,24) || ('Printer'+i);
   try{
     const r = await adminFetch('/api/printer/add',{method:'POST',
       body: JSON.stringify({name, uri:d.uri, driver, location:loc, is_default:def, page_size:a4?'A4':'Letter'})});

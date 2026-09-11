@@ -1096,6 +1096,167 @@ function collectBody(req) {
   });
 }
 
+
+// ==========================================================================
+// [PRINTER-MODEL] 打印机"干净品牌型号"解析（修复驱动匹配错位）
+// --------------------------------------------------------------------------
+// 问题现场：lpinfo -v 的 usb 设备行是 `direct usb://HP/LaserJet%20P2015%20Series?serial=00CNCJD24599`
+//   · 行首是 `direct `（不是 URI）→ 旧代码 grep '^usb://' 永远匹配不到；
+//   · 拿整串当查询做驱动打分时，norm() 会把 usb / serial / 序列号 一起变成 token，
+//     整串包含命不中，token 命中又被序列号带偏 → 匹配到别的型号的驱动。
+// 正确做法：CUPS 已经帮我们算好了干净型号，直接取（比字符串清洗可靠）：
+//   lpinfo -l -v → Device 块里的  make-and-model = HP LaserJet P2015 Series
+//                              device-id      = MFG:Hewlett-Packard;MDL:HP LaserJet P2015 Series;...
+// 拿不到时再用 URI 清洗兜底。
+// ==========================================================================
+
+/** 解析 lpinfo -l -v → Map<uri, {info, makeAndModel, deviceId}> */
+async function lpDevicesDetailed() {
+  const map = new Map();
+  const { out } = await exec('sh', ['-c', 'lpinfo -l -v 2>/dev/null']);
+  if (!out) return map;
+  let cur = null;
+  const flush = () => { if (cur && cur.uri) map.set(cur.uri, cur); cur = null; };
+  for (const raw of out.split('\n')) {
+    const line = raw.replace(/\r$/, '');
+    if (/^Device:/.test(line)) {
+      flush();
+      const m = line.match(/uri\s*=\s*(.+)$/);
+      cur = m ? { uri: m[1].trim(), info: '', makeAndModel: '', deviceId: '' } : null;
+      continue;
+    }
+    if (!cur) continue;
+    let mm;
+    if ((mm = line.match(/^\s*make-and-model\s*=\s*(.*)$/))) cur.makeAndModel = mm[1].trim();
+    else if ((mm = line.match(/^\s*info\s*=\s*(.*)$/))) cur.info = mm[1].trim();
+    else if ((mm = line.match(/^\s*device-id\s*=\s*(.*)$/))) cur.deviceId = mm[1].trim();
+  }
+  flush();
+  return map;
+}
+
+/** 解析 device-id：MFG:Hewlett-Packard;MDL:HP LaserJet P2015 Series;CMD:PCL,POSTSCRIPT;... */
+function parseDeviceId(id) {
+  const out = {};
+  for (const part of String(id || '').split(';')) {
+    const i = part.indexOf(':');
+    if (i <= 0) continue;
+    const k = part.slice(0, i).trim().toUpperCase();
+    const v = part.slice(i + 1).trim();
+    if (k === 'MFG' || k === 'MANUFACTURER') out.mfg = v;
+    else if (k === 'MDL' || k === 'MODEL') out.mdl = v;
+    else if (k === 'DES') out.des = v;
+    else if (k === 'CMD') out.cmd = v;
+  }
+  return out;
+}
+
+/** 厂商名归一（Hewlett-Packard → HP） */
+function normMakeName(mfg, model) {
+  const t = ((mfg || '') + ' ' + (model || '')).toLowerCase();
+  if (/hewlett|packard|\bhp\b/.test(t)) return 'HP';
+  return guessMake(t) || '';
+}
+
+/** 兜底：从 URI 清洗出干净型号（去 backend 前缀 / ?serial 后缀 / ._ipp._tcp 等） */
+function cleanModelFromUri(uri) {
+  let u = String(uri || '').trim();
+  const backend = (u.match(/^([a-z][a-z0-9+.-]*):\/\//i) || [])[1] || '';
+  u = u.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '');
+  u = u.split('#')[0].split('?')[0];
+  try { u = decodeURIComponent(u); } catch (e) { u = u.replace(/%20/gi, ' '); }
+  u = u.replace(/\+/g, ' ');
+  if (/^usb$/i.test(backend)) {
+    // usb://HP/LaserJet P2015 Series → HP LaserJet P2015 Series（斜杠当空格，厂商段要保留）
+    u = u.replace(/\//g, ' ');
+  } else {
+    // dnssd://Xxx._ipp._tcp.local/cups → Xxx
+    u = u.replace(/\._(ipp|ipps|printer|pdl-datastream|tcp|udp)[^/]*/gi, '');
+    u = u.replace(/\.local\b/gi, '');
+    u = u.split('/')[0];
+  }
+  return u.replace(/\s+/g, ' ').trim();
+}
+
+
+// ==========================================================================
+// [PRINTER-MODEL-2] 设备详情关联索引
+// --------------------------------------------------------------------------
+// lpinfo -v 与 lpinfo -l -v 对同一台打印机会给出两种 backend 写法：
+//   usb://HP/LaserJet%20P2015%20Series?serial=00CNCJD24599   (listPrinters 用这条)
+//   hp:/usb/HP_LaserJet_P2015_Series?serial=00CNCJD24599      (lpinfo -l -v 的 Device.uri)
+// 精确 Map<uri> 查表会落空 → 拿不到 CUPS 算好的权威型号。
+// 这里用三级回退把两边对上：序列号 → 归一 URI → 精确 URI。
+// ==========================================================================
+
+/** URI 归一 key：抹平 backend 写法 / %20 / 大小写 / 下划线差异 */
+function cleanUriKey(u) {
+  let s = String(u || '').trim();
+  s = s.replace(/^[a-z][a-z0-9+.-]*:\/*/i, '');      // usb://  hp:/  dnssd:// 全去掉
+  s = s.split('?')[0].split('#')[0];                  // 去 ?serial=... / #fragment
+  try { s = decodeURIComponent(s); } catch (e) { s = s.replace(/%20/gi, ' '); }
+  s = s.replace(/[/_+]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+  s = s.replace(/^(usb|direct|hp|hplip|network|socket|lpd|ipp|ipps|dnssd|mdns)\s+/, '');  // 再剥一层
+  return s;
+}
+
+/** 从 URI 抠序列号 —— 同一台设备换 backend 写法后序列号不变，是最可靠的关联键 */
+function uriSerial(u) {
+  const m = String(u || '').match(/serial=([A-Za-z0-9._-]{4,})/i);
+  return m ? m[1].toUpperCase() : '';
+}
+
+/** 三级回退查找设备详情 */
+function resolveDeviceDetail(detail, index, d) {
+  if (!detail || !detail.size) return null;
+  if (detail.has(d.uri)) return detail.get(d.uri);
+  const ser = uriSerial(d.uri);
+  if (ser && index.bySerial.has(ser)) return index.bySerial.get(ser);
+  const k = cleanUriKey(d.uri);
+  if (k && index.byKey.has(k)) return index.byKey.get(k);
+  return null;
+}
+
+/** 给 listPrinters() 的 discovered 补上干净 make / model（含来源标注，便于排查） */
+async function enrichDiscoveredModels(discovered) {
+  let detail;
+  try { detail = await lpDevicesDetailed(); } catch (e) { detail = new Map(); }
+  // [PRINTER-MODEL-2] 建关联索引（序列号 / 归一 URI），跨 backend 写法也能对上
+  const index = { bySerial: new Map(), byKey: new Map() };
+  for (const [k, v] of detail) {
+    const s = uriSerial(k); if (s && !index.bySerial.has(s)) index.bySerial.set(s, v);
+    const nk = cleanUriKey(k); if (nk && !index.byKey.has(nk)) index.byKey.set(nk, v);
+  }
+  for (const d of discovered) {
+    const det = resolveDeviceDetail(detail, index, d);
+    const idp = parseDeviceId(det && det.deviceId);
+    const mm = det && det.makeAndModel && det.makeAndModel !== 'Unknown' ? det.makeAndModel : '';
+    const fromId = idp.mdl && idp.mdl !== 'Unknown' ? idp.mdl : '';
+    const clean = fromId || mm || cleanModelFromUri(d.uri);
+    d.model = clean || '';
+    d.model_raw = mm || (det && det.info) || d.info || d.uri;   // 原始串仅作展示，不参与匹配
+    d.model_source = fromId ? 'device-id' : (mm ? 'lpinfo' : 'uri');
+    if (!d.make) d.make = normMakeName(idp.mfg, clean);
+    d.device_id = (det && det.deviceId) || '';
+  }
+  return discovered;
+}
+
+/**
+ * [PRINTER-MODEL] 匹配查询清洗：即使调用方传进来的是原始 URI / 脏字符串，
+ * 也要保证 usb:// / ?serial= / 序列号 这类噪声不参与驱动打分。
+ */
+function cleanMatchQuery(q) {
+  let s = String(q || '');
+  s = s.replace(/[a-z][a-z0-9+.-]*:\/\//gi, ' ');   // 去 backend 前缀
+  s = s.split('#')[0].split('?')[0];                 // 去 ?serial=... / #fragment
+  try { s = decodeURIComponent(s); } catch (e) { s = s.replace(/%20/gi, ' '); }
+  const drop = /^(usb|direct|network|serial|uuid|local|cups|ipp|ipps|socket|lpd|dnssd|mdns|print|printer|port|host|beh|tcp|udp|pdl|datastream)$/i;
+  return norm(s).split(' ')
+    .filter((t) => t && !drop.test(t) && !/^[0-9a-f]{6,}$/i.test(t) && !/^\d{5,}$/.test(t))
+    .join(' ');
+}
+
 // ---------- 驱动库预加载 ----------
 async function loadDrivers() {
   const { out } = await exec('lpinfo', ['-m']);
@@ -1115,7 +1276,8 @@ async function loadDrivers() {
 
 // ---------- 驱动匹配打分 ----------
 function scoreDriver(query, desc) {
-  const q = norm(query), d = norm(desc);
+  // [PRINTER-MODEL] 查询先清洗：去 backend 前缀 / ?serial 后缀 / 序列号 token
+  const q = cleanMatchQuery(query), d = norm(desc);
   if (!q) return 0;
   let score = 0;
   if (d.includes(q)) score += 120;            // 整串包含(强)
@@ -1743,6 +1905,8 @@ async function listPrinters() {
     const info = t.replace(uriMatch[0], '').replace(/^(direct|network)\s+/, '').replace(/^[\s:]+/, '').trim();
     discovered.push({ uri, backend, info: info || uri, make: guessMake(info || uri) });
   }
+  // [PRINTER-MODEL] 覆盖成 CUPS 算好的"干净品牌型号"（取不到才回退 URI 清洗）
+  await enrichDiscoveredModels(discovered);
   return { configured, discovered };
 }
 function guessMake(s) {
@@ -2566,7 +2730,15 @@ const server = http.createServer(async function (req, res) {
       const data = await listPrinters();
       // 给已发现的补一个推荐驱动
       for (const d of data.discovered) {
-        const qry = (d.info || d.uri);
+        // [PRINTER-MODEL] 匹配只用"干净品牌+型号"：HP LaserJet P2015 Series
+        // 旧实现用 d.info||d.uri（= usb://HP/...?serial=...）→ 匹配到别的型号的驱动
+        let qry = d.model || '';
+        const mk = d.make || '';
+        if (mk && !new RegExp('(^|[^a-z0-9])' + mk.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '([^a-z0-9]|$)', 'i').test(qry)) {
+          qry = (mk + ' ' + qry).trim();
+        }
+        if (!cleanMatchQuery(qry)) qry = d.model_raw || d.uri;   // 极端兜底：型号实在解析不出
+        d.match_query = qry;
         d.drivers = matchDrivers(qry, 6).map(x => ({ driver: x.driver, desc: x.desc, score: x.score }));
         d.best = d.drivers[0] || null;
       }
@@ -2582,7 +2754,8 @@ const server = http.createServer(async function (req, res) {
     const qry = q.get('q') || '';
     const matches = matchDrivers(qry, 10);
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ query: qry, matches }));
+    // cleaned：实际参与打分的清洗后查询（前端展示"用什么在匹配"，便于人工改型号重试）
+    return res.end(JSON.stringify({ query: qry, cleaned: cleanMatchQuery(qry), matches }));
   }
 
   if (url === '/api/printer/add' && req.method === 'POST') {

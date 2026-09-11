@@ -129,11 +129,62 @@ install_docker() {
   log_ok "Docker 就绪"
 }
 
+# ---- 打印机探测辅助（内部）----------------------------------------------------
+# 注意：lpinfo -v 每行形如 `direct usb://HP/LaserJet%20P2015%20Series?serial=xxx`
+#        或 `network ipp` / `network https`（行首是 backend 名，不是 URI）。
+#        所以历史实现里的 grep -E '^usb://' 永远命中 0 行 → 部署时"未识别到打印机"。
+#        URI 必须从行内提取。
+
+# 取某 URI 的 make-and-model（CUPS 已算好的干净品牌型号）
+_prn_make_of() {
+  lpinfo -l -v 2>/dev/null | grep -F "uri = $1" -A 8 \
+    | sed -n 's/^[[:space:]]*make-and-model[[:space:]]*=[[:space:]]*//p' | head -1
+}
+
+# 从 lpinfo -v 里按优先级挑 URI：usb:// → hp:/usb/ → 网络类。
+# $2 非空时只接受 make-and-model 含该品牌词的设备（如 HP）。
+_prn_pick_uri() {
+  local list="$1" brand="${2:-}" t line cand mk
+  for t in 'usb://' 'hp:/usb/' 'ipp://' 'ipps://' 'socket://' 'dnssd://' 'lpd://' 'http://' 'https://'; do
+    while IFS= read -r line; do
+      case "$line" in
+        *"$t"*) ;;
+        *) continue ;;
+      esac
+      cand=$(printf '%s' "$line" | sed -n "s|.*\($t[^ ]*\).*|\1|p" | head -1)
+      [ -z "$cand" ] && continue
+      if [ -n "$brand" ]; then
+        mk=$(_prn_make_of "$cand") || mk=""
+        printf '%s' "$mk" | grep -qi "$brand" || continue
+      fi
+      printf '%s' "$cand"
+      return 0
+    done <<EOF
+$list
+EOF
+  done
+  return 1
+}
+
+# 按型号特征词从 lpinfo -m 里挑 PPD：先找 PostScript，再退任意匹配
+_prn_pick_ppd() {
+  local model="$1" tok hit
+  [ -z "$model" ] && return 1
+  for tok in $(printf '%s' "$model" | tr 'A-Z' 'a-z' | grep -oE '[a-z]*[0-9][a-z0-9]*' | sort -u); do
+    [ ${#tok} -lt 3 ] && continue
+    hit=$(lpinfo -m 2>/dev/null | grep -i -- "$tok" | grep -iE 'postscript|ps\.ppd' | head -1 | awk '{print $1}')
+    [ -z "$hit" ] && hit=$(lpinfo -m 2>/dev/null | grep -i -- "$tok" | head -1 | awk '{print $1}')
+    [ -n "$hit" ] && { printf '%s' "$hit"; return 0; }
+  done
+  return 1
+}
+
 # configure_printer_auto: 自动探测 USB/网络打印机并注册 CUPS 队列（幂等，已有同名队列则跳过）
-#   - 用 lpinfo -v 找 usb:// 或 ipp:// 设备；优先匹配 PRINTER_DEFAULT 关键字（如 HP）
-#   - 驱动优先 everywhere（IPP 无驱动打印），失败回退 raw
+#   - URI 从 lpinfo -v 行内提取（usb:// 优先，hp:/usb/ 次之，网络类再次），按 PRINTER_DEFAULT 品牌筛选
+#   - 驱动优先 everywhere（IPP 无驱动打印），失败按型号挑 PPD，再退 raw
 configure_printer_auto() {
   command -v lpadmin >/dev/null 2>&1 || { log_warn "CUPS 未装，跳过打印机配置"; return 0; }
+  command -v lpinfo  >/dev/null 2>&1 || { log_warn "CUPS 客户端(lpinfo)缺失，跳过打印机配置"; return 0; }
   if lpstat -p 2>/dev/null | grep -q "printer ${PRINTER_DEFAULT}"; then
     log_ok "打印机队列已存在: ${PRINTER_DEFAULT}"
     return 0
@@ -141,24 +192,38 @@ configure_printer_auto() {
   log_step "自动配置打印机（CUPS）"
   systemctl enable --now cups >/dev/null 2>&1 || service cups start >/dev/null 2>&1 || true
   sleep 2
-  local uri want="$PRINTER_DEFAULT"
-  # 从 lpinfo -v 抓设备 URI：usb:// 优先，其后 ipp://；关键字匹配（品牌名含于 want，如 HP）
-  uri=$(lpinfo -v 2>/dev/null | grep -E '^usb://' | head -1 || true)
-  if [ -z "$uri" ]; then uri=$(lpinfo -v 2>/dev/null | grep -E '^(ipp|ipps|socket)://' | head -1 || true); fi
-  if [ -z "$uri" ]; then
-    log_warn "未探测到 USB/网络打印机（lpinfo -v 无设备）。请接好打印机后重跑，或手动:"
-    log_warn "  lpadmin -p ${want} -E -v <设备URI> -m everywhere"
+
+  local want="$PRINTER_DEFAULT"
+  local devlist; devlist=$(lpinfo -v 2>/dev/null || true)
+  if [ -z "$devlist" ]; then
+    log_warn "未探测到任何打印设备（lpinfo -v 无输出）。请接好打印机后重跑，或稍后在中间页【识别打印机】里添加。"
     return 0
   fi
-  # 关键字筛选：若 want 含品牌词（如 HP）且有匹配设备则用匹配的
-  local brand; brand=$(echo "$want" | grep -oE '^[A-Za-z]+' | head -1 || true)
-  if [ -n "$brand" ]; then
-    local m; m=$(lpinfo -v 2>/dev/null | grep -E '^usb://' | grep -i "$brand" | head -1 || true)
-    [ -n "$m" ] && uri="$m"
+
+  local brand; brand=$(printf '%s' "$want" | grep -oE '^[A-Za-z]+' | head -1 || true)
+  local uri; uri=$(_prn_pick_uri "$devlist" "$brand") || uri=""
+  if [ -z "$uri" ]; then uri=$(_prn_pick_uri "$devlist" "") || uri=""; fi
+  if [ -z "$uri" ]; then
+    log_warn "探测到设备但未解析出可用 URI；稍后请在中间页【识别打印机】里手动添加。"
+    return 0
   fi
-  log_info "探测到打印机: $uri → 注册队列 ${want}"
-  lpadmin -p "$want" -E -v "$uri" -m everywhere 2>/dev/null     || lpadmin -p "$want" -E -v "$uri" -o printer-is-shared=false 2>/dev/null     || lpadmin -p "$want" -E -v "$uri" -m raw 2>/dev/null     || { log_warn "lpadmin 注册失败（驱动问题），可手动执行: lpadmin -p ${want} -E -v '$uri' -m everywhere"; return 0; }
+
+  local model; model=$(_prn_make_of "$uri") || model=""
+  log_info "探测到打印机: ${model:-未知型号}  ←  $uri"
+
+  local ppd; ppd=$(_prn_pick_ppd "$model") || ppd=""
+  if lpadmin -p "$want" -E -v "$uri" -m everywhere 2>/dev/null; then
+    log_ok "打印机队列就绪(驱动 everywhere): ${want}"
+  elif [ -n "$ppd" ] && lpadmin -p "$want" -E -v "$uri" -m "$ppd" 2>/dev/null; then
+    log_ok "打印机队列就绪(驱动 ${ppd}): ${want}"
+  elif lpadmin -p "$want" -E -v "$uri" -m raw 2>/dev/null; then
+    log_warn "打印机队列就绪(驱动 raw)。若打印乱码/不出纸，请在中间页【识别打印机】里改选驱动。"
+  else
+    log_warn "lpadmin 注册失败（驱动问题）。请在中间页【识别打印机】里选择驱动，或手动:"
+    log_warn "  lpadmin -p ${want} -E -v '$uri' -m everywhere"
+    return 0
+  fi
   cupsenable "$want" 2>/dev/null || true
   cupsaccept "$want" 2>/dev/null || true
-  log_ok "打印机队列就绪: ${want} ← $uri"
+  return 0
 }
