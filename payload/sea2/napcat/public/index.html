@@ -23,6 +23,8 @@
   .badge{margin-left:auto;font-size:12px;padding:6px 12px;border-radius:20px;border:1px solid var(--line);background:var(--card);color:var(--mut);display:flex;align-items:center;gap:6px}
   .dot{width:8px;height:8px;border-radius:50%;background:var(--mut)}
   .dot.ok{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .dot.wait{background:var(--acc);box-shadow:0 0 8px var(--acc);animation:dotpulse 1.2s ease-in-out infinite}
+  @keyframes dotpulse{0%,100%{opacity:1}50%{opacity:.3}}
   .dot.off{background:var(--warn)}
   .card{background:linear-gradient(180deg,var(--card),var(--bg2));border:1px solid var(--line);border-radius:18px;padding:20px;margin-bottom:18px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
   .card h2{font-size:15px;margin:0 0 4px;font-weight:700;display:flex;align-items:center;gap:8px}
@@ -376,14 +378,22 @@ async function poll(){
     renderChannels(d);            // 主/副账号卡片
     if(switching) return;         // 切换账号期间不刷新连接态，避免闪烁
     connected = d.connected;
-    $('#connDot').className = 'dot ' + (connected?'ok':'off');
-    $('#connTxt').textContent = connected ? '已连接' : '未连接';
-    if(connected){
+    // [CONN-3STATE] connected(WS+账号在线) / connecting(QQ已登录但OneBot控制通道还在建立) / offline
+    const cs = d.conn_state || (connected ? 'connected' : (((d.login_info&&d.login_info.loggedIn)||(d.backup_login_info&&d.backup_login_info.loggedIn)) ? 'connecting' : 'offline'));
+    const _cd = $('#connDot'), _ct = $('#connTxt');
+    if(_cd) _cd.className = 'dot ' + (cs==='connected'?'ok':(cs==='connecting'?'wait':'off'));
+    if(_ct) _ct.textContent = cs==='connected' ? '已连接' : (cs==='connecting' ? '连接中…（QQ 已登录，正在建立控制通道）' : '未连接');
+    if(cs === 'connected'){
       // [FIX 2026-08-27] 守卫可能不存在的旧 UI 节点（#qrWrap/#loginState/#successBox），避免 null.classList 崩溃
       const qrWrap = $('#qrWrap'); if (qrWrap) qrWrap.classList.add('hide');
       const loginState = $('#loginState');
       if (loginState) { loginState.className = 'state ok'; loginState.innerHTML = '<span class="dot ok"></span>已连接'; }
       const successBox = $('#successBox'); if (successBox) successBox.classList.add('show');
+    } else if(cs === 'connecting'){
+      // 已登录、通道还在建立：不弹扫码等待 UI，也不误报"未连接"
+      const qrWrap = $('#qrWrap'); if (qrWrap) qrWrap.classList.add('hide');
+      const loginState = $('#loginState');
+      if (loginState) { loginState.className = 'state ok'; loginState.innerHTML = '<span class="dot wait"></span>已登录 · 控制通道建立中'; }
     } else {
       showWaitingLogin();
     }

@@ -1327,7 +1327,19 @@ async function detectConnected() {
   const role = readFrameworkRole();
   const port = role === 'SEA1_ACTIVE' ? 9092 : SEA2.wsPort;
   const { out } = await exec('sh', ['-c', 'ss -tn 2>/dev/null | grep -E ":' + port + '" | grep -iE "estab" | head -1']);
-  state.connected = !!out.trim();
+  const wsOk = !!out.trim();
+  // [CONN-3STATE] WS 只代表"管道在"，不代表 QQ 真在线。项目铁律：判活必须用 get_status.online。
+  // 旧实现只看 ss → 扫码后 OneBot 模块重启的窗口内（无 ESTAB）控制台显示「未连接」，
+  // 而登录卡片却显示「已登录」，用户极易误判为故障。这里补账号在线复核：
+  //   connected = wsOk && accountOnline；探针不可用(null) → 回退只看 wsOk，不引入新误判。
+  let online = null;
+  try {
+    if (role === 'SEA1_ACTIVE') online = await fetchNapcatOnline(SEA2_BACKUP_NAPCAT_URL, SEA2_BACKUP_NAPCAT_TOKEN);
+    else online = await fetchNapcatOnline(NAPCAT_HTTP_URL, NAPCAT_HTTP_TOKEN);
+  } catch (e) { online = null; }
+  state.wsOk = wsOk;
+  state.accountOnline = online;
+  state.connected = (online === null) ? wsOk : (wsOk && online);
 }
 async function detectToken() {
   if (!fs.existsSync(QR_PATH)) return;
@@ -2663,7 +2675,10 @@ const server = http.createServer(async function (req, res) {
   // API
   if (url === '/api/status') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ connected: state.connected, lan_ip: state.lanIp, external: EXTERNAL_URL || null, fixed_url: fixedUrl(), token: state.token ? 'present' : 'absent', switching: state.switching, role: readFrameworkRole(), login_info: state.loginInfo, backup_login_info: state.backupLoginInfo, napcat_http_configured: !!NAPCAT_HTTP_TOKEN, ts: Date.now() }));
+    // [CONN-3STATE] conn_state: connected=在线可用 / connecting=QQ已登录但控制通道未建立 / offline=未登录
+    const _loggedIn = !!(state.loginInfo && state.loginInfo.loggedIn) || !!(state.backupLoginInfo && state.backupLoginInfo.loggedIn);
+    const _connState = state.connected ? 'connected' : (_loggedIn ? 'connecting' : 'offline');
+    return res.end(JSON.stringify({ connected: state.connected, conn_state: _connState, ws_ok: state.wsOk === true, account_online: state.accountOnline === true, lan_ip: state.lanIp, external: EXTERNAL_URL || null, fixed_url: fixedUrl(), token: state.token ? 'present' : 'absent', switching: state.switching, role: readFrameworkRole(), login_info: state.loginInfo, backup_login_info: state.backupLoginInfo, napcat_http_configured: !!NAPCAT_HTTP_TOKEN, ts: Date.now() }));
   }
 
   // 原生管理台入口信息：返回指向本服务代理的地址（自动登录由代理完成）
